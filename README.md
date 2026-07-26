@@ -2,7 +2,7 @@
 
 Uptime monitoring, Slack alerting, and uptime reporting for the Sentinel platform.
 
-A Next.js app deployed on **Vercel** that:
+A Next.js app deployed on **Vercel** at **https://monitor.fortiqo.xyz** (its own Vercel project + Cloudflare DNS, the same shape as `docs.fortiqo.xyz`) that:
 
 1. **Checks every Sentinel service every 5 minutes** (health-endpoint probes, 3 attempts before a service counts as down).
 2. **Alerts on Slack in realtime** (`#sentinel-alarms`) the moment a service goes down — which service, why, since when, what it breaks for users, and the first command to run — then posts a threaded recovery message with the exact downtime.
@@ -28,10 +28,11 @@ What remains is **configuration, not code** — see [Go live](#go-live) below. U
 | [05-data-model.md](docs/05-data-model.md) | Postgres schema, uptime math, retention, full env var list |
 | [06-implementation-plan.md](docs/06-implementation-plan.md) | What shipped, and the remaining go-live checklist |
 | [07-operations-notes.md](docs/07-operations-notes.md) | Incident log & ops findings |
+| [08-deployment.md](docs/08-deployment.md) | **Deployment runbook** — Vercel project, env vars, `monitor.fortiqo.xyz` DNS, GitHub Actions secrets, verification |
 
 ## Go live
 
-Six things to set, in this order. Every one is a value you paste into the Vercel project's **Environment Variables**, then redeploy.
+Full runbook with every click: **[docs/08-deployment.md](docs/08-deployment.md)**. In summary, six things to set — each a value you paste into the Vercel project's **Environment Variables**, then redeploy.
 
 | # | What | Env var(s) | Where it comes from |
 |---|---|---|---|
@@ -40,21 +41,23 @@ Six things to set, in this order. Every one is a value you paste into the Vercel
 | 3 | Scheduler secret | `CRON_SECRET` | `openssl rand -hex 32`. Also add it as a GitHub Actions secret |
 | 4 | Gateway probe token | `MONITOR_TOKEN` | `openssl rand -hex 32`. The **same value** goes into sentinel-gateway's env |
 | 5 | Gateway URL | `GATEWAY_URL` | `https://sentinel-api.fortiqo.xyz` |
-| 6 | Dashboard URL | `DASHBOARD_URL` | This app's own Vercel URL, so Slack alerts link back to it |
+| 6 | Dashboard URL | `DASHBOARD_URL` | `https://monitor.fortiqo.xyz`, so Slack alerts link back to it |
 
-Then, in this repo's GitHub settings → Secrets and variables → Actions, add `CRON_SECRET` and `OBSERV_URL` (this app's URL). The workflow in [`.github/workflows/monitor-tick.yml`](.github/workflows/monitor-tick.yml) drives all three schedules.
+Domain: Vercel → Settings → Domains → add `monitor.fortiqo.xyz`, then a Cloudflare `CNAME monitor → cname.vercel-dns.com` with the proxy **off** (grey cloud) so Vercel can issue and renew the certificate.
+
+Then, in this repo's GitHub settings → Secrets and variables → Actions, add `CRON_SECRET` and `OBSERV_URL` (`https://monitor.fortiqo.xyz`). The workflow in [`.github/workflows/monitor-tick.yml`](.github/workflows/monitor-tick.yml) drives all three schedules.
 
 Verify, in order:
 
 ```bash
 # 1. Slack credentials work and the bot is in the channel
-curl -H "Authorization: Bearer $CRON_SECRET" https://<observ-url>/api/slack/test
+curl -H "Authorization: Bearer $CRON_SECRET" https://monitor.fortiqo.xyz/api/slack/test
 
 # 2. The gateway aggregate endpoint answers
 curl -H "X-Monitor-Token: $MONITOR_TOKEN" https://sentinel-api.fortiqo.xyz/internal/monitor/health
 
 # 3. A full tick runs, persists and alerts
-curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://<observ-url>/api/cron/check
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://monitor.fortiqo.xyz/api/cron/check
 ```
 
 ## Routes

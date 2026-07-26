@@ -26,6 +26,11 @@ byte-identical copies — edit both together.
 An external uptime monitor for the Sentinel platform. It probes every service from outside the
 network every five minutes, alerts Slack on transitions, and serves a status dashboard.
 
+**Deploys as its own Vercel project to https://monitor.fortiqo.xyz** (Cloudflare DNS, same shape as
+`docs.fortiqo.xyz`). Push to `main` → Vercel build. The 5-minute cadence comes from this repo's own
+GitHub Actions workflow, not Vercel Cron — Hobby-plan crons only fire once per day. Runbook:
+[`docs/08-deployment.md`](docs/08-deployment.md).
+
 It is **read-only with respect to the platform**: it calls health endpoints and nothing else. It
 never writes to a Sentinel service, never holds a Sentinel credential beyond `MONITOR_TOKEN`, and
 never proxies user traffic. If a change would make this app able to mutate platform state, it
