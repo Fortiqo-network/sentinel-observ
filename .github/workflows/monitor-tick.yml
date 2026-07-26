@@ -1,0 +1,52 @@
+name: monitor
+
+# Vercel Cron on the Hobby plan only fires once per day, so the 5-minute
+# cadence comes from GitHub Actions instead. Cron times are UTC.
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # health tick
+    - cron: "30 3 * * *"    # daily report  (09:00 IST)
+    - cron: "30 3 * * 1"    # weekly report (Mondays, 09:00 IST)
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Which endpoint to call
+        required: true
+        default: check
+        type: choice
+        options: [check, daily, weekly]
+
+concurrency:
+  group: monitor-${{ github.event.schedule || inputs.job }}
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    if: github.event.schedule == '*/5 * * * *' || inputs.job == 'check'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run health check
+        run: |
+          curl -fsS -m 90 -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.OBSERV_URL }}/api/cron/check"
+
+  daily:
+    if: github.event.schedule == '30 3 * * *' || inputs.job == 'daily'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post daily report
+        run: |
+          curl -fsS -m 90 -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.OBSERV_URL }}/api/cron/daily"
+
+  weekly:
+    if: github.event.schedule == '30 3 * * 1' || inputs.job == 'weekly'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post weekly report
+        run: |
+          curl -fsS -m 90 -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.OBSERV_URL }}/api/cron/weekly"

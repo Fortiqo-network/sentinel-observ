@@ -1,26 +1,39 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { Archivo, IBM_Plex_Mono } from "next/font/google";
+import "./globals.css";
+
+const archivo = Archivo({
+  subsets: ["latin"],
+  variable: "--font-archivo",
+  display: "swap",
+});
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-plex-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "Sentinel Observ",
-  description: "Uptime monitoring and alerting for the Sentinel platform",
+  title: {
+    default: "Sentinel Observ — platform status",
+    template: "%s | Sentinel Observ",
+  },
+  description:
+    "Live uptime, latency and incident history for every Sentinel platform service, probed every five minutes.",
+  robots: { index: false, follow: false },
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export const viewport: Viewport = {
+  themeColor: "#0B0C0F",
+};
+
+export default function RootLayout({ children }: { children: ReactNode }): React.JSX.Element {
   return (
-    <html lang="en">
-      <body
-        style={{
-          margin: 0,
-          fontFamily:
-            "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
-          background: "#0b0f14",
-          color: "#e6edf3",
-          minHeight: "100vh",
-        }}
-      >
-        {children}
-      </body>
+    <html lang="en" className={`${archivo.variable} ${plexMono.variable}`}>
+      <body className="min-h-screen">{children}</body>
     </html>
   );
 }

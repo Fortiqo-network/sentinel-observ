@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Colors and typography live in lib/design/*.ts and are wired into Tailwind via
+   tailwind.config.ts. Nothing here re-declares a color that exists there. */
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-ink-950 font-sans text-porcelain antialiased;
+  }
+
+  ::selection {
+    background: rgba(231, 160, 60, 0.28);
+  }
+}
+
+@layer components {
+  /* Standard dashboard surface — one card treatment used everywhere. */
+  .panel {
+    @apply rounded-xl border border-porcelain/10 bg-ink-900/70 backdrop-blur-[2px];
+  }
+
+  .panel-pad {
+    @apply p-5 sm:p-6;
+  }
+
+  /* Uppercase micro-label above a metric or section. */
+  .eyebrow {
+    @apply font-brand-mono text-[11px] uppercase tracking-[0.18em] text-graphite;
+  }
+
+  .metric {
+    @apply font-brand-mono tabular-nums;
+  }
+}
+
+@layer utilities {
+  .ring-hairline {
+    box-shadow: inset 0 0 0 1px rgba(236, 234, 227, 0.08);
+  }
+
+  /* Ambient wash behind the page header — matches the marketing surface. */
+  .aurora-wash {
+    background: radial-gradient(
+      ellipse 100% 55% at 50% 0%,
+      rgba(231, 160, 60, 0.07),
+      transparent 60%
+    );
+  }
+
+  /* Faint film-grain to kill banding on the dark canvas. */
+  .grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(236, 234, 227, 0.18) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(236, 234, 227, 0.18);
+    border-radius: 3px;
+  }
+}
+
+/* The Tessera seam scan — the brand's only permanent animation.
+   "The system is never asleep", which is exactly what this app does. */
+@keyframes tesseraScan {
+  from {
+    stroke-dashoffset: 26;
+  }
+  to {
+    stroke-dashoffset: -154;
+  }
+}
+.tessera-scan {
+  stroke-dasharray: 26 154;
+  animation: tesseraScan 1.7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tessera-scan {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

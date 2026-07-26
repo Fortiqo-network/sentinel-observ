@@ -4,19 +4,18 @@ Uptime monitoring, Slack alerting, and uptime reporting for the Sentinel platfor
 
 A Next.js app deployed on **Vercel** that:
 
-1. **Checks every Sentinel service every 5 minutes** (health-endpoint probes).
-2. **Alerts on Slack in realtime** (`#sentinel-alarms`) the moment a service goes down, with a proper error message (which service, why, since when) — and posts a recovery message when it comes back.
-3. **Posts a daily summary** (per-service uptime %, incidents, response times) and a **weekly summary** to Slack.
-4. Serves a **status dashboard** (uptime history, incident log) as a web UI.
+1. **Checks every Sentinel service every 5 minutes** (health-endpoint probes, 3 attempts before a service counts as down).
+2. **Alerts on Slack in realtime** (`#sentinel-alarms`) the moment a service goes down — which service, why, since when, what it breaks for users, and the first command to run — then posts a threaded recovery message with the exact downtime.
+3. **Posts a daily and a weekly summary** (per-service uptime %, incidents, latency, MTTR, week-over-week trend).
+4. Serves a **monitoring dashboard**: live status, 24-hour latency chart, 90-day uptime bars, incident log, per-service drill-down, and the monitor's own liveness.
 
 ## Status
 
-**Phase 1 (current): documentation & design — complete.** Development is on hold until the plan is approved; see [docs/06-implementation-plan.md](docs/06-implementation-plan.md) for Phase 2.
+**Phase 2 is built.** Probe engine, Postgres persistence, the alert state machine, Slack alerting (down / storm / recovery / reminders), daily + weekly reports, the dashboard, and the gateway aggregate endpoint are all implemented. `npm run build` passes.
 
-What already exists in this repo (beyond docs):
+What remains is **configuration, not code** — see [Go live](#go-live) below. Until each secret is set the app degrades honestly rather than lying: with no `DATABASE_URL` the dashboard still probes live but records nothing, and with no `MONITOR_TOKEN` the five internal services show as *not monitored* rather than as up.
 
-- `scripts/probe.mjs` — working one-shot health checker (validated 7/7 services up on 2026-07-26, and immediately caught a real `sentinel-runtime` crash loop — see [docs/07-operations-notes.md](docs/07-operations-notes.md)).
-- A minimal, **Vercel-deployable** Next.js skeleton: live status page at `/`, `GET /api/probe`, and a `CRON_SECRET`-guarded `POST /api/cron/check` stub. `npm run build` passes. No database, no Slack, no history yet — those are Phase 2. Internal services show "n/a" until the gateway aggregate endpoint (Phase 2, step 2) is deployed.
+> The Postgres query layer has not yet been exercised against a live database — the first `/api/cron/check` against a real `DATABASE_URL` is the step that proves it.
 
 ## Documentation
 
@@ -24,31 +23,83 @@ What already exists in this repo (beyond docs):
 |---|---|
 | [01-architecture.md](docs/01-architecture.md) | System design, why this shape, key constraints (Vercel cannot reach internal services, Vercel cron limits) |
 | [02-service-inventory.md](docs/02-service-inventory.md) | Every `sentinel-*` repo: what it is, whether/how it is monitored, exact health endpoints |
-| [03-slack-bot-setup.md](docs/03-slack-bot-setup.md) | Super-baby-steps: create the Slack app/bot, the `#sentinel-alarms` channel, tokens, test message |
-| [04-monitoring-spec.md](docs/04-monitoring-spec.md) | Probe logic, retry/flap protection, alert state machine, exact Slack message formats (down / recovery / daily / weekly) |
-| [05-data-model.md](docs/05-data-model.md) | Postgres schema, uptime math, retention |
-| [06-implementation-plan.md](docs/06-implementation-plan.md) | Phase-2 build order, env vars, deployment steps, acceptance checklist |
-| [07-operations-notes.md](docs/07-operations-notes.md) | Incident log & ops findings (runtime crash-loop root cause + pending durable fix, env-file topology, fleet baseline) |
+| [03-slack-bot-setup.md](docs/03-slack-bot-setup.md) | Super-baby-steps: create the Slack app/bot, the channels, tokens, test message |
+| [04-monitoring-spec.md](docs/04-monitoring-spec.md) | Probe logic, retry/flap protection, alert state machine, exact Slack message formats |
+| [05-data-model.md](docs/05-data-model.md) | Postgres schema, uptime math, retention, full env var list |
+| [06-implementation-plan.md](docs/06-implementation-plan.md) | What shipped, and the remaining go-live checklist |
+| [07-operations-notes.md](docs/07-operations-notes.md) | Incident log & ops findings |
 
-## Quick start (works today, before any code)
+## Go live
 
-A standalone probe script that checks all services once and prints a table — run it from the server (it can reach the internal Docker ports):
+Six things to set, in this order. Every one is a value you paste into the Vercel project's **Environment Variables**, then redeploy.
+
+| # | What | Env var(s) | Where it comes from |
+|---|---|---|---|
+| 1 | Slack bot | `SLACK_BOT_TOKEN`, `SLACK_ALARM_CHANNEL_ID`, `SLACK_REPORT_CHANNEL_ID` | [docs/03](docs/03-slack-bot-setup.md) — 15 clicks, no code |
+| 2 | Database | `DATABASE_URL` | Vercel → Storage → Neon (free tier). Tables are created automatically on the first tick |
+| 3 | Scheduler secret | `CRON_SECRET` | `openssl rand -hex 32`. Also add it as a GitHub Actions secret |
+| 4 | Gateway probe token | `MONITOR_TOKEN` | `openssl rand -hex 32`. The **same value** goes into sentinel-gateway's env |
+| 5 | Gateway URL | `GATEWAY_URL` | `https://sentinel-api.fortiqo.xyz` |
+| 6 | Dashboard URL | `DASHBOARD_URL` | This app's own Vercel URL, so Slack alerts link back to it |
+
+Then, in this repo's GitHub settings → Secrets and variables → Actions, add `CRON_SECRET` and `OBSERV_URL` (this app's URL). The workflow in [`.github/workflows/monitor-tick.yml`](.github/workflows/monitor-tick.yml) drives all three schedules.
+
+Verify, in order:
 
 ```bash
-node scripts/probe.mjs
+# 1. Slack credentials work and the bot is in the channel
+curl -H "Authorization: Bearer $CRON_SECRET" https://<observ-url>/api/slack/test
+
+# 2. The gateway aggregate endpoint answers
+curl -H "X-Monitor-Token: $MONITOR_TOKEN" https://sentinel-api.fortiqo.xyz/internal/monitor/health
+
+# 3. A full tick runs, persists and alerts
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://<observ-url>/api/cron/check
 ```
 
-## Repo layout (after Phase 2)
+## Routes
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `/` | public | Dashboard: live status, KPIs, service grid, latency chart, 90-day uptime, incidents, monitor health |
+| `/services/[id]` | public | Per-service drill-down: uptime, latency, incident history, raw checks, runbook |
+| `/incidents` | public | Full incident log with MTTR and the worst outage |
+| `GET /api/status` | public | JSON snapshot of everything above |
+| `GET /api/probe` | public | One-shot live probe, no persistence |
+| `POST /api/cron/check` | `CRON_SECRET` | The 5-minute tick: probe → persist → alert |
+| `POST /api/cron/daily` | `CRON_SECRET` | Daily report + rollups + prune |
+| `POST /api/cron/weekly` | `CRON_SECRET` | Weekly report with trend and MTTR |
+| `GET /api/slack/test` | `CRON_SECRET` | Post a test message to each configured channel |
+
+## Local development
+
+```bash
+npm install
+cp .env.example .env.local     # fill in what you have; everything is optional
+npm run dev                    # http://localhost:3000
+npm run probe                  # zero-dependency one-shot checker, no app needed
+```
+
+## Repo layout
 
 ```
 sentinel-observ/
-├── app/                  # Next.js App Router: dashboard + API routes
-│   ├── api/cron/check/   # 5-min probe endpoint (called by scheduler)
-│   ├── api/cron/daily/   # daily summary endpoint
-│   ├── api/cron/weekly/  # weekly summary endpoint
-│   └── (dashboard)/      # status pages
-├── lib/                  # probe engine, slack client, uptime math
-├── scripts/probe.mjs     # standalone one-shot checker (no deps)
-├── docs/                 # this documentation set
-└── vercel.json           # cron config (if on Vercel Pro)
+├── app/
+│   ├── page.tsx                  # dashboard overview
+│   ├── services/[id]/page.tsx    # per-service detail
+│   ├── incidents/page.tsx        # incident log
+│   └── api/{status,probe,slack/test,cron/{check,daily,weekly}}
+├── components/                   # brand mark, panels, charts, dashboard sections
+├── lib/
+│   ├── services.ts               # the inventory — single source of truth
+│   ├── probe.ts                  # probe engine (retries, error normalization)
+│   ├── state.ts                  # pure alert state machine
+│   ├── tick.ts                   # probe → persist → decide → alert
+│   ├── slack.ts / messages.ts    # transport + Block Kit payloads
+│   ├── db.ts / schema.ts / repo.ts   # Postgres access
+│   ├── rollup.ts                 # uptime math + period reports
+│   ├── dashboard.ts              # everything the UI renders
+│   └── design/                   # colour + type tokens mirrored from sentinel-frontend
+├── scripts/probe.mjs             # standalone one-shot checker (no deps)
+└── .github/workflows/monitor-tick.yml
 ```

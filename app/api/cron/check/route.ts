@@ -1,28 +1,32 @@
 import { NextResponse } from "next/server";
-import { probeAll } from "@/lib/probe";
+import { requireCronSecret } from "@/lib/auth";
+import { runCheckTick } from "@/lib/tick";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * 5-minute monitoring tick, called by the GitHub Actions scheduler
- * (see docs/01-architecture.md). Phase 2 adds: DB persistence, the alert
- * state machine and Slack notifications (docs/04-monitoring-spec.md).
+ * The 5-minute monitoring tick, called by the GitHub Actions scheduler
+ * (docs/01-architecture.md). Probes every service, persists the results, runs
+ * the alert state machine, and posts to Slack on transitions.
+ *
+ * GET and POST behave identically so the endpoint can be exercised with a
+ * plain browser-less curl during setup.
  */
-export async function POST(req: Request) {
-  const auth = req.headers.get("authorization");
-  const secret = process.env.CRON_SECRET;
-  if (!secret || auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+async function handle(req: Request): Promise<NextResponse> {
+  const denied = requireCronSecret(req);
+  if (denied) return denied;
 
-  const results = await probeAll();
-  return NextResponse.json({
-    checked_at: new Date().toISOString(),
-    up: results.filter((r) => r.ok).length,
-    total: results.length,
-    services: results,
-    persisted: false, // Phase 2
-    alerted: false, // Phase 2
-  });
+  try {
+    const summary = await runCheckTick();
+    return NextResponse.json(summary);
+  } catch (err) {
+    return NextResponse.json(
+      { error: "tick failed", detail: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    );
+  }
 }
+
+export const GET = handle;
+export const POST = handle;

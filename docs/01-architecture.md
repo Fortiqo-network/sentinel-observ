@@ -65,7 +65,7 @@ jobs:
             https://<observ-domain>.vercel.app/api/cron/check
 ```
 
-- Daily (`0 9 * * *`) and weekly (`0 9 * * 1`) summary triggers: same pattern, two more schedule entries hitting `/api/cron/daily` and `/api/cron/weekly`. (These two *would* fit in Hobby's Vercel Cron allowance; keeping all three in GitHub Actions keeps one mechanism.)
+- Daily (`30 3 * * *`) and weekly (`30 3 * * 1`) summary triggers: same pattern, two more schedule entries hitting `/api/cron/daily` and `/api/cron/weekly`. GitHub cron is UTC, so 03:30 UTC is 09:00 IST. (These two *would* fit in Hobby's Vercel Cron allowance; keeping all three in GitHub Actions keeps one mechanism.) The shipped workflow uses `if: github.event.schedule == …` to route each schedule to its own job, plus a `workflow_dispatch` input to run any of the three by hand.
 - GitHub schedules can drift a few minutes under load — acceptable for a 5-min health cadence. The uptime math (doc 05) is based on actual check timestamps, not assumed intervals, so drift doesn't corrupt the numbers.
 - If the project is ever on Vercel Pro, delete the workflow and move all three schedules into `vercel.json` — endpoints are identical.
 
@@ -104,7 +104,9 @@ GitHub Actions (cron */5)                    Slack workspace
 | **State machine** (`lib/state.ts`) | Compare results with each service's last known state in DB; decide `still_up / went_down / still_down / recovered`; open/close incident rows |
 | **Slack client** (`lib/slack.ts`) | `chat.postMessage` with Block Kit payloads (formats in doc 04); no SDK needed, one `fetch` call |
 | **Rollup** (`lib/rollup.ts`) | Uptime %, incident list, latency stats over a window (day/week) |
-| **Dashboard** | Read-only pages over the same tables |
+| **Tick** (`lib/tick.ts`) | Orchestration: probe → persist → classify → alert → record the run |
+| **Dashboard data** (`lib/dashboard.ts`) | One assembler feeding both the pages and `GET /api/status`, so they cannot drift |
+| **Dashboard** | Read-only pages over the same tables: `/`, `/services/[id]`, `/incidents` |
 
 ## Modifications to existing repos (kept minimal)
 
