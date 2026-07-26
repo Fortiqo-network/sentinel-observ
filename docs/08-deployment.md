@@ -80,10 +80,13 @@ Vercel Cron on the Hobby plan only fires once per day, so the 5-minute cadence c
 
 GitHub → `Fortiqo-network/sentinel-observ` → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
 
-| Secret | Value |
-|---|---|
-| `CRON_SECRET` | the same value as in Vercel |
-| `OBSERV_URL` | `https://monitor.fortiqo.xyz` |
+| Secret | Value | Required |
+|---|---|---|
+| `CRON_SECRET` | the same value as in Vercel | yes |
+| `SLACK_BOT_TOKEN` | the same `xoxb-…` as in Vercel | no — enables the "monitor itself failed" warning |
+| `SLACK_ALARM_CHANNEL_ID` | the same `C…` as in Vercel | no — pairs with the above |
+
+There is **no `OBSERV_URL` secret**: the workflow defaults to `https://monitor.fortiqo.xyz`. Set an `OBSERV_URL` repository *variable* only if you need to aim the scheduler at a preview deployment.
 
 Then **Actions** → **monitor** → **Run workflow** → job `check` to fire one immediately instead of waiting for the schedule.
 

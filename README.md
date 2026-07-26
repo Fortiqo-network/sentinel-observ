@@ -29,6 +29,7 @@ What remains is **configuration, not code** — see [Go live](#go-live) below. U
 | [06-implementation-plan.md](docs/06-implementation-plan.md) | What shipped, and the remaining go-live checklist |
 | [07-operations-notes.md](docs/07-operations-notes.md) | Incident log & ops findings |
 | [08-deployment.md](docs/08-deployment.md) | **Deployment runbook** — Vercel project, env vars, `monitor.fortiqo.xyz` DNS, GitHub Actions secrets, verification |
+| [09-secrets-and-vercel.md](docs/09-secrets-and-vercel.md) | **Canonical reference** — every secret and where it lives, which values must match, all Vercel project settings, rotation order |
 
 ## Go live
 
@@ -45,7 +46,7 @@ Full runbook with every click: **[docs/08-deployment.md](docs/08-deployment.md)*
 
 Domain: Vercel → Settings → Domains → add `monitor.fortiqo.xyz`, then a Cloudflare `CNAME monitor → cname.vercel-dns.com` with the proxy **off** (grey cloud) so Vercel can issue and renew the certificate.
 
-Then, in this repo's GitHub settings → Secrets and variables → Actions, add `CRON_SECRET` and `OBSERV_URL` (`https://monitor.fortiqo.xyz`). The workflow in [`.github/workflows/monitor-tick.yml`](.github/workflows/monitor-tick.yml) drives all three schedules.
+Then, in this repo's GitHub settings → Secrets and variables → Actions, add **`CRON_SECRET`** — that is the only required one; the workflow defaults to `https://monitor.fortiqo.xyz`. Optionally add `SLACK_BOT_TOKEN` + `SLACK_ALARM_CHANNEL_ID` so a failed run warns you that the monitor itself is down. [`.github/workflows/monitor-tick.yml`](.github/workflows/monitor-tick.yml) drives all three schedules. Full table: [docs/09](docs/09-secrets-and-vercel.md).
 
 Verify, in order:
 

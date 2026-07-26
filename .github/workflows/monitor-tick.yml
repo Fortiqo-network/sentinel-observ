@@ -1,7 +1,11 @@
 name: monitor
 
 # Vercel Cron on the Hobby plan only fires once per day, so the 5-minute
-# cadence comes from GitHub Actions instead. Cron times are UTC.
+# cadence comes from here instead. Cron times are UTC.
+#
+# On Mondays at 03:30 UTC two entries match, so GitHub starts two runs — one
+# per schedule string. That is intended: the weekly report is a separate run
+# from the daily one, and the step below routes each by its own schedule.
 on:
   schedule:
     - cron: "*/5 * * * *"   # health tick
@@ -21,32 +25,57 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tick:
-    if: github.event.schedule == '*/5 * * * *' || inputs.job == 'check'
+  run:
     runs-on: ubuntu-latest
+    env:
+      # The production domain is fixed, so there is no OBSERV_URL secret to
+      # forget. Set an OBSERV_URL repository *variable* only to point the
+      # scheduler somewhere else (a preview deployment, say).
+      OBSERV_URL: ${{ vars.OBSERV_URL || 'https://monitor.fortiqo.xyz' }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_ALARM_CHANNEL_ID: ${{ secrets.SLACK_ALARM_CHANNEL_ID }}
     steps:
-      - name: Run health check
+      - name: Pick the endpoint for this trigger
+        id: which
         run: |
-          curl -fsS -m 90 -X POST \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "${{ secrets.OBSERV_URL }}/api/cron/check"
+          case "${{ github.event.schedule }}" in
+            "*/5 * * * *") job=check  ;;
+            "30 3 * * *")  job=daily  ;;
+            "30 3 * * 1")  job=weekly ;;
+            *)             job="${{ inputs.job || 'check' }}" ;;
+          esac
+          echo "job=$job" >> "$GITHUB_OUTPUT"
+          echo "Calling /api/cron/$job"
 
-  daily:
-    if: github.event.schedule == '30 3 * * *' || inputs.job == 'daily'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Post daily report
+      - name: Call the endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          JOB: ${{ steps.which.outputs.job }}
         run: |
-          curl -fsS -m 90 -X POST \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "${{ secrets.OBSERV_URL }}/api/cron/daily"
+          set -euo pipefail
+          # Only the health tick is retried. It is idempotent (the state machine
+          # alerts on transitions, not on runs), whereas retrying a report after
+          # a 5xx could post the same summary twice.
+          if [ "$JOB" = "check" ]; then retries="--retry 2 --retry-delay 10"; else retries=""; fi
+          # shellcheck disable=SC2086
+          curl -fsS $retries -m 90 -X POST \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${OBSERV_URL}/api/cron/${JOB}" | tee response.json
+          echo
 
-  weekly:
-    if: github.event.schedule == '30 3 * * 1' || inputs.job == 'weekly'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Post weekly report
+      - name: Alert Slack that the monitor itself failed
+        # Meta-monitoring: if this step never runs, nobody learns that the
+        # platform went unwatched — a broken deploy or an expired secret looks
+        # exactly like "no incidents" on the dashboard.
+        if: failure() && env.SLACK_BOT_TOKEN != '' && env.SLACK_ALARM_CHANNEL_ID != ''
+        env:
+          JOB: ${{ steps.which.outputs.job }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          curl -fsS -m 90 -X POST \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "${{ secrets.OBSERV_URL }}/api/cron/weekly"
+          text="⚠️ sentinel-observ could not run its ${JOB} job — the platform is currently UNWATCHED. Check ${RUN_URL}"
+          jq -n --arg c "$SLACK_ALARM_CHANNEL_ID" --arg t "$text" \
+            '{channel:$c, text:$t, unfurl_links:false}' \
+          | curl -sS -X POST https://slack.com/api/chat.postMessage \
+              -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+              -H 'Content-Type: application/json; charset=utf-8' \
+              --data @-
