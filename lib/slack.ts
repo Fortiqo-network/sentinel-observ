@@ -67,6 +67,48 @@ export async function postMessage(params: {
   }
 }
 
+export type SlackIdentity = {
+  handle: string | null;
+  team: string | null;
+  scopes: string[];
+};
+
+/**
+ * Ask Slack who this token belongs to, via `auth.test`.
+ *
+ * Used by the credential test so a `not_in_channel` failure can name the
+ * handle to actually invite — the bot's username is set at install time and is
+ * often not the app's display name, which is a reliably confusing 10 minutes
+ * for whoever is wiring it up. Also surfaces the granted scopes, which Slack
+ * returns in a response header rather than the body.
+ */
+export async function whoAmI(): Promise<SlackIdentity | { error: string }> {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token) return { error: "SLACK_BOT_TOKEN is not set" };
+
+  try {
+    const res = await fetch("https://slack.com/api/auth.test", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    const data = (await res.json()) as {
+      ok: boolean;
+      user?: string;
+      team?: string;
+      error?: string;
+    };
+    if (!data.ok) return { error: data.error ?? `HTTP ${res.status}` };
+    return {
+      handle: data.user ?? null,
+      team: data.team ?? null,
+      scopes: (res.headers.get("x-oauth-scopes") ?? "").split(",").filter(Boolean),
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /** Post to the realtime alarm channel. */
 export function postAlarm(params: {
   text: string;

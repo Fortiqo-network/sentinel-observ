@@ -1,6 +1,40 @@
 import { NextResponse } from "next/server";
 import { requireCronSecret } from "@/lib/auth";
-import { alarmChannel, isSlackConfigured, postAlarm, postReport, reportChannel } from "@/lib/slack";
+import {
+  alarmChannel,
+  isSlackConfigured,
+  postAlarm,
+  postReport,
+  reportChannel,
+  whoAmI,
+  type PostResult,
+  type SlackIdentity,
+} from "@/lib/slack";
+
+/** Turn a Slack error code into the specific next action, naming the real bot handle. */
+function hintFor(result: PostResult, identity: SlackIdentity | { error: string }): string {
+  const error = result.ok ? "" : result.error;
+  const handle = "handle" in identity && identity.handle ? `@${identity.handle}` : "@<your-bot>";
+  const scopes = "scopes" in identity ? identity.scopes : [];
+
+  if (error === "not_in_channel") {
+    return `The bot is not a member of that channel. Run \`/invite ${handle}\` in it${
+      scopes.includes("chat:write.public")
+        ? ""
+        : ", or add the chat:write.public scope and reinstall so an invite is never required"
+    }.`;
+  }
+  if (error === "channel_not_found") {
+    return "Channel ID is wrong, or the bot cannot see that channel. Copy the ID (C…) from the channel's About tab — not the channel name.";
+  }
+  if (error === "invalid_auth" || error === "token_revoked") {
+    return "SLACK_BOT_TOKEN is wrong or revoked. Recopy it from OAuth & Permissions and redeploy.";
+  }
+  if (error === "missing_scope") {
+    return `Granted scopes are [${scopes.join(", ") || "none"}] — chat:write is required. Add it, then reinstall the app (scope changes need a reinstall).`;
+  }
+  return `Slack returned \`${error}\`. Granted scopes: [${scopes.join(", ") || "none"}].`;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +64,8 @@ async function handle(req: Request): Promise<NextResponse> {
     );
   }
 
+  const identity = await whoAmI();
+
   const alarm = await postAlarm({
     text: "🟢 Sentinel Observ is connected. This is a test message from the alarm channel.",
     blocks: [
@@ -52,14 +88,12 @@ async function handle(req: Request): Promise<NextResponse> {
 
   return NextResponse.json({
     ok: alarm.ok && (report === null || report.ok),
+    bot: identity,
     alarmChannel: { id: alarmChannel(), result: alarm },
     reportChannel: sameChannel
       ? { id: reportChannel(), result: "same as alarm channel — skipped" }
       : { id: reportChannel(), result: report },
-    hint:
-      alarm.ok
-        ? undefined
-        : "not_in_channel → run /invite @Sentinel Observ · invalid_auth → recopy SLACK_BOT_TOKEN · channel_not_found → recheck the channel ID",
+    hint: alarm.ok ? undefined : hintFor(alarm, identity),
   });
 }
 
