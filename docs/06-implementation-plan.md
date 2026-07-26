@@ -8,7 +8,9 @@ Build order follows the requested sequence: **script first → Slack bot → rea
 - [ ] Create a Neon Postgres database (Vercel dashboard → Storage → Create → Neon, free tier) → `DATABASE_URL`.
 - [ ] Generate secrets: `openssl rand -hex 32` twice → `CRON_SECRET`, `MONITOR_TOKEN`.
 
-## Step 1 — Standalone probe script (already in repo)
+> **Progress (2026-07-26):** Step 1 is ✅ done and validated (7/7 up; found and hot-fixed a runtime crash loop — see doc 07). Step 3 is partially done: the Next.js skeleton (status page, `/api/probe`, guarded `/api/cron/check` stub, `lib/services.ts`, `lib/probe.ts`) exists and builds; DB layer and state machine are still pending. Further development is paused pending plan approval.
+
+## Step 1 — Standalone probe script (already in repo) ✅
 
 `scripts/probe.mjs` — zero-dependency Node script that probes what it can reach and prints a table. Run from the server (sees internal ports directly) or from anywhere (public URLs only):
 
@@ -20,6 +22,8 @@ node scripts/probe.mjs --public   # from anywhere: gateway + frontend only
 - [ ] Run it, confirm the current health-endpoint paths in doc 02 are correct (fix inventory if any 404s).
 
 ## Step 2 — Gateway aggregate endpoint (`sentinel-gateway` repo)
+
+> Note (from doc 07): `MONITOR_TOKEN` must be added as a **GitHub secret + `deploy.yml` env line** in sentinel-gateway — editing local env files does not survive a redeploy.
 
 - [ ] New router `monitor.py`: `GET /internal/monitor/health`, requires `X-Monitor-Token == settings.MONITOR_TOKEN`, concurrent `httpx` fan-out (3 s timeout each) to the 5 internal URLs from doc 02, returns the JSON shape from doc 01. Registered like `/readiness` (bypasses metering/rate-limit).
 - [ ] Unit tests (mocked httpx) + add `MONITOR_TOKEN` to gateway env + compose prod env.

@@ -11,8 +11,12 @@ A Next.js app deployed on **Vercel** that:
 
 ## Status
 
-**Phase 1 (current): documentation & design — complete.**
-Phase 2: development. See [docs/06-implementation-plan.md](docs/06-implementation-plan.md).
+**Phase 1 (current): documentation & design — complete.** Development is on hold until the plan is approved; see [docs/06-implementation-plan.md](docs/06-implementation-plan.md) for Phase 2.
+
+What already exists in this repo (beyond docs):
+
+- `scripts/probe.mjs` — working one-shot health checker (validated 7/7 services up on 2026-07-26, and immediately caught a real `sentinel-runtime` crash loop — see [docs/07-operations-notes.md](docs/07-operations-notes.md)).
+- A minimal, **Vercel-deployable** Next.js skeleton: live status page at `/`, `GET /api/probe`, and a `CRON_SECRET`-guarded `POST /api/cron/check` stub. `npm run build` passes. No database, no Slack, no history yet — those are Phase 2. Internal services show "n/a" until the gateway aggregate endpoint (Phase 2, step 2) is deployed.
 
 ## Documentation
 
@@ -24,6 +28,7 @@ Phase 2: development. See [docs/06-implementation-plan.md](docs/06-implementatio
 | [04-monitoring-spec.md](docs/04-monitoring-spec.md) | Probe logic, retry/flap protection, alert state machine, exact Slack message formats (down / recovery / daily / weekly) |
 | [05-data-model.md](docs/05-data-model.md) | Postgres schema, uptime math, retention |
 | [06-implementation-plan.md](docs/06-implementation-plan.md) | Phase-2 build order, env vars, deployment steps, acceptance checklist |
+| [07-operations-notes.md](docs/07-operations-notes.md) | Incident log & ops findings (runtime crash-loop root cause + pending durable fix, env-file topology, fleet baseline) |
 
 ## Quick start (works today, before any code)
 
