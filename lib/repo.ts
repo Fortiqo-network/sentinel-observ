@@ -391,6 +391,98 @@ export async function getRuns(since: Date, kind = "check"): Promise<MonitorRunRo
   );
 }
 
+// ── Traffic (sentinel-frontend pageviews) ─────────────────────────────────────
+
+/** Record one visit. Called by the ingest endpoint, one row per request. */
+export async function recordPageview(params: {
+  path: string;
+  referrerHost: string | null;
+  country: string | null;
+  occurredAt?: Date;
+}): Promise<void> {
+  await query(
+    `INSERT INTO pageviews (occurred_at, path, referrer_host, country)
+     VALUES (COALESCE($1::timestamptz, now()), $2, $3, $4)`,
+    [params.occurredAt ?? null, params.path.slice(0, 512), params.referrerHost, params.country],
+  );
+}
+
+export type TrafficTotals = {
+  last_hour: number;
+  last_24h: number;
+  last_7d: number;
+  last_30d: number;
+  all_time: number;
+};
+
+/** Visit counts over the standard windows, in one pass over the index. */
+export async function getTrafficTotals(): Promise<TrafficTotals> {
+  const rows = await query<TrafficTotals>(
+    `SELECT
+       (COUNT(*) FILTER (WHERE occurred_at >= now() - INTERVAL '1 hour'))::int  AS last_hour,
+       (COUNT(*) FILTER (WHERE occurred_at >= now() - INTERVAL '24 hours'))::int AS last_24h,
+       (COUNT(*) FILTER (WHERE occurred_at >= now() - INTERVAL '7 days'))::int   AS last_7d,
+       (COUNT(*) FILTER (WHERE occurred_at >= now() - INTERVAL '30 days'))::int  AS last_30d,
+       COUNT(*)::int AS all_time
+     FROM pageviews`,
+  );
+  return rows[0] ?? { last_hour: 0, last_24h: 0, last_7d: 0, last_30d: 0, all_time: 0 };
+}
+
+export type TrafficBucket = { bucket: Date; views: number };
+
+/** Visits per hour over the last 24 h, for the traffic chart. */
+export async function getTrafficByHour(): Promise<TrafficBucket[]> {
+  return query<TrafficBucket>(
+    `SELECT date_trunc('hour', occurred_at) AS bucket, COUNT(*)::int AS views
+     FROM pageviews
+     WHERE occurred_at >= now() - INTERVAL '24 hours'
+     GROUP BY 1 ORDER BY 1 ASC`,
+  );
+}
+
+export type TrafficDay = { day: string; views: number };
+
+/** Visits per UTC day over a window, for the bar chart. */
+export async function getTrafficByDay(days: number): Promise<TrafficDay[]> {
+  return query<TrafficDay>(
+    `SELECT to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, COUNT(*)::int AS views
+     FROM pageviews
+     WHERE occurred_at >= now() - ($1::int * INTERVAL '1 day')
+     GROUP BY 1 ORDER BY 1 ASC`,
+    [days],
+  );
+}
+
+export type TrafficBreakdown = { label: string; views: number };
+
+/** Top values of one dimension over a window. */
+export async function getTrafficBreakdown(
+  dimension: "path" | "referrer_host" | "country",
+  days: number,
+  limit = 10,
+): Promise<TrafficBreakdown[]> {
+  const column = { path: "path", referrer_host: "referrer_host", country: "country" }[dimension];
+  return query<TrafficBreakdown>(
+    `SELECT COALESCE(${column}, 'unknown') AS label, COUNT(*)::int AS views
+     FROM pageviews
+     WHERE occurred_at >= now() - ($1::int * INTERVAL '1 day')
+     GROUP BY 1 ORDER BY views DESC LIMIT $2`,
+    [days, limit],
+  );
+}
+
+/** Drop pageviews older than the retention window. Returns rows removed. */
+export async function prunePageviews(retentionDays: number): Promise<number> {
+  const rows = await query<{ removed: number }>(
+    `WITH deleted AS (
+       DELETE FROM pageviews WHERE occurred_at < now() - ($1::int * INTERVAL '1 day') RETURNING 1
+     ) SELECT COUNT(*)::int AS removed FROM deleted`,
+    [retentionDays],
+  );
+  return rows[0]?.removed ?? 0;
+}
+
 // ── Rollup maintenance (daily job) ────────────────────────────────────────────
 
 /** Write (or refresh) the per-service aggregate row for a completed day. */

@@ -5,6 +5,7 @@ import { AutoRefresh } from "./AutoRefresh";
 const LINKS = [
   { href: "/", label: "Overview" },
   { href: "/incidents", label: "Incidents" },
+  { href: "/analytics", label: "Traffic" },
   { href: "/api/status", label: "API" },
 ];
 

@@ -8,6 +8,9 @@ A Next.js app deployed on **Vercel** at **https://monitor.fortiqo.xyz** (its own
 2. **Alerts on Slack in realtime** (`#sentinel-alarms`) the moment a service goes down — which service, why, since when, what it breaks for users, and the first command to run — then posts a threaded recovery message with the exact downtime.
 3. **Posts a daily and a weekly summary** (per-service uptime %, incidents, latency, MTTR, week-over-week trend).
 4. Serves a **monitoring dashboard**: live status, 24-hour latency chart, 90-day uptime bars, incident log, per-service drill-down, and the monitor's own liveness.
+5. Counts **every visit to sentinel-frontend**, reported server-side from its edge middleware so ad-blockers cannot undercount, and charts it at `/analytics`.
+
+The dashboard is **private** — password-protected via `middleware.ts` and excluded from every search index. The scheduler, Slack test and pageview-ingest endpoints are exempt from the login wall because they authenticate with their own secrets.
 
 ## Status
 
@@ -65,11 +68,13 @@ curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://monitor.fortiqo.xyz
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `/` | public | Dashboard: live status, KPIs, service grid, latency chart, 90-day uptime, incidents, monitor health |
-| `/services/[id]` | public | Per-service drill-down: uptime, latency, incident history, raw checks, runbook |
-| `/incidents` | public | Full incident log with MTTR and the worst outage |
-| `GET /api/status` | public | JSON snapshot of everything above |
-| `GET /api/probe` | public | One-shot live probe, no persistence |
+| `/` | password | Dashboard: live status, KPIs, service grid, latency chart, 90-day uptime, incidents, monitor health |
+| `/services/[id]` | password | Per-service drill-down: uptime, latency, incident history, raw checks, runbook |
+| `/incidents` | password | Full incident log with MTTR and the worst outage |
+| `/analytics` | password | sentinel-frontend visit counts: hourly, daily, top pages, referrers, countries |
+| `GET /api/status` | password | JSON snapshot of the monitoring data |
+| `GET /api/probe` | password | One-shot live probe, no persistence |
+| `POST /api/ingest/pageview` | `INGEST_TOKEN` | Pageview beacon from sentinel-frontend's edge middleware |
 | `POST /api/cron/check` | `CRON_SECRET` | The 5-minute tick: probe → persist → alert |
 | `POST /api/cron/daily` | `CRON_SECRET` | Daily report + rollups + prune |
 | `POST /api/cron/weekly` | `CRON_SECRET` | Weekly report with trend and MTTR |

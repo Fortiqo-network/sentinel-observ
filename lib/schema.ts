@@ -58,6 +58,19 @@ CREATE TABLE IF NOT EXISTS daily_rollups (
   PRIMARY KEY (day, service_id)
 );
 
+-- one row per visit to sentinel-frontend, reported by its edge middleware.
+-- Deliberately not de-duplicated: the requirement is raw visit volume, and
+-- storing no identifier keeps this well clear of being personal data.
+CREATE TABLE IF NOT EXISTS pageviews (
+  id            BIGSERIAL PRIMARY KEY,
+  occurred_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  path          TEXT NOT NULL,
+  referrer_host TEXT,
+  country       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pageviews_time ON pageviews (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pageviews_path ON pageviews (path, occurred_at DESC);
+
 CREATE TABLE IF NOT EXISTS monitor_runs (
   id             BIGSERIAL PRIMARY KEY,
   ran_at         TIMESTAMPTZ NOT NULL DEFAULT now(),

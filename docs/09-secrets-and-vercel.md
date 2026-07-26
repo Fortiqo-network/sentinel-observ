@@ -18,6 +18,29 @@ Everything that has to be configured, in one table per location. If a value appe
 | `SLACK_REPORT_CHANNEL_ID` | a second `C…` (optional) | Reports go to the alarm channel |
 | `DASHBOARD_URL` | `https://monitor.fortiqo.xyz` | Slack alerts carry no link back |
 | `DATABASE_URL` | **injected by the Neon integration — do not type it in** | Live-probe-only: no history, no incidents, no alerts |
+| `DASHBOARD_PASSWORD_HASH` | `pbkdf2:210000:…:…` | **Nobody can sign in.** Fails closed — the dashboard is never publicly readable |
+| `INGEST_TOKEN` | `openssl rand -hex 32` | `/analytics` stays empty; the frontend's beacons are rejected |
+
+### The dashboard password
+
+The UI is private. `middleware.ts` requires a session cookie for every page and
+for `/api/status`; `/api/cron/*`, `/api/slack/*` and `/api/ingest/*` are exempt
+because they carry their own stronger auth and are called by systems that cannot
+fill in a login form.
+
+Only a PBKDF2-SHA256 hash is stored, never the password. Generate one with:
+
+```bash
+node -e "const c=require('crypto');const s=c.randomBytes(16);const i=210000;console.log('pbkdf2:'+i+':'+s.toString('base64')+':'+c.pbkdf2Sync(process.argv[1],s,i,32,'sha256').toString('base64'))" 'your-password'
+```
+
+The `:` separators are deliberate. The conventional `$` form (`pbkdf2$210000$…`)
+is silently corrupted by dotenv variable expansion — `$210000` expands to an
+empty string — producing a hash that can never match and a login that fails with
+no visible cause. Base64 never emits `:`, so it is unambiguous.
+
+Changing the password invalidates every existing session automatically: the
+cookie signing key is derived from the hash.
 
 > **Do not add the Slack variables to the Preview scope.** A preview deployment with a valid bot token can post real alarms into the real channel from a branch. Left unset, `isSlackConfigured()` returns false and previews stay silent — which is the behaviour you want.
 
@@ -35,6 +58,18 @@ Everything that has to be configured, in one table per location. If a value appe
 | Variable | `OBSERV_URL` | — | **Leave unset.** The workflow defaults to `https://monitor.fortiqo.xyz`. Set it only to aim the scheduler at a preview deployment |
 
 The two optional Slack secrets close a real gap: if a deploy breaks or `CRON_SECRET` drifts, the workflow fails and the dashboard keeps showing "no incidents" because nothing is being checked. With them set, a failed run posts *"the platform is currently UNWATCHED"* to the alarm channel. Without them the step is skipped silently — nothing breaks, you just lose that warning.
+
+## 2b. Vercel — sentinel-**frontend** project
+
+One variable pair, so the traffic dashboard has anything to show. **Production scope.**
+
+| Name | Value |
+|---|---|
+| `OBSERV_INGEST_URL` | `https://monitor.fortiqo.xyz/api/ingest/pageview` |
+| `OBSERV_INGEST_TOKEN` | the same value as `INGEST_TOKEN` in sentinel-observ |
+
+With either unset the beacon is skipped entirely and page delivery is unaffected —
+analytics can never break the marketplace.
 
 ## 3. GitHub — `Fortiqo-network/sentinel-gateway`
 
@@ -57,6 +92,7 @@ The deploy workflow already reads it (`.github/workflows/deploy.yml`) and writes
 | `CRON_SECRET` | Vercel + sentinel-observ GH secret | Every scheduled run fails with 401; dashboard silently stops updating |
 | `MONITOR_TOKEN` | Vercel + sentinel-gateway GH secret | 5 internal services stuck on *not monitored* — the gateway rejects the token |
 | `SLACK_BOT_TOKEN` | Vercel + (optionally) sentinel-observ GH secret | Alerts work but the "monitor is down" warning does not, or vice versa |
+| `INGEST_TOKEN` / `OBSERV_INGEST_TOKEN` | sentinel-observ Vercel + sentinel-frontend Vercel | Every beacon is rejected with 401; `/analytics` stays permanently empty |
 
 ---
 

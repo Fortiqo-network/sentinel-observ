@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireCronSecret } from "@/lib/auth";
 import { hasDatabase } from "@/lib/db";
 import { ensureSchema } from "@/lib/schema";
-import { pruneChecks, recordRun } from "@/lib/repo";
+import { pruneChecks, prunePageviews, recordRun } from "@/lib/repo";
 import { buildPeriodReport, persistDailyRollups } from "@/lib/rollup";
 import { dailyReportMessage } from "@/lib/messages";
 import { isSlackConfigured, postReport } from "@/lib/slack";
@@ -12,6 +12,7 @@ export const maxDuration = 60;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CHECK_RETENTION_DAYS = 90;
+const PAGEVIEW_RETENTION_DAYS = 365;
 
 /**
  * Daily summary job.
@@ -40,6 +41,7 @@ async function handle(req: Request): Promise<NextResponse> {
 
   await persistDailyRollups(new Date(to.getTime() - DAY_MS));
   const pruned = await pruneChecks(CHECK_RETENTION_DAYS);
+  const prunedViews = await prunePageviews(PAGEVIEW_RETENTION_DAYS);
 
   let posted = false;
   let postError: string | null = null;
@@ -66,6 +68,7 @@ async function handle(req: Request): Promise<NextResponse> {
     incidents: report.totalIncidents,
     ticks: { actual: report.ticksActual, expected: report.ticksExpected },
     prunedChecks: pruned,
+    prunedPageviews: prunedViews,
     posted,
     postError,
   });
