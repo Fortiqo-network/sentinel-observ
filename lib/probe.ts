@@ -191,6 +191,7 @@ async function probeAggregate(services: ServiceDef[]): Promise<CheckResult[]> {
   }
 
   let lastReason = "unknown error";
+  let misconfigured = false;
   let attempts = 0;
 
   for (let i = 0; i < MAX_ATTEMPTS - 1; i += 1) {
@@ -202,8 +203,19 @@ async function probeAggregate(services: ServiceDef[]): Promise<CheckResult[]> {
         cache: "no-store",
       });
       if (!res.ok) {
+        // 401/403 = our token is wrong; 503 = the gateway has MONITOR_TOKEN unset.
+        // Both mean the monitor cannot see these services — which is NOT the same
+        // as the services being down, and must never page anyone. Retrying cannot
+        // help either, so stop immediately.
+        if (res.status === 401 || res.status === 403 || res.status === 503) {
+          misconfigured = true;
+          lastReason =
+            res.status === 503
+              ? "the gateway has MONITOR_TOKEN unset, so its monitor endpoint is disabled"
+              : "the gateway rejected MONITOR_TOKEN — the two values do not match";
+          break;
+        }
         lastReason = `aggregate endpoint returned HTTP ${res.status}`;
-        if (res.status === 401 || res.status === 503) break;
         await sleep(RETRY_DELAY_MS);
         continue;
       }
@@ -248,7 +260,10 @@ async function probeAggregate(services: ServiceDef[]): Promise<CheckResult[]> {
     }
   }
 
-  const reason = `gateway unreachable (${lastReason}) — the entire backend stack may be offline`;
+  const reason = misconfigured
+    ? `not monitored — ${lastReason}`
+    : `gateway unreachable (${lastReason}) — the entire backend stack may be offline`;
+
   return services.map((svc) => ({
     id: svc.id,
     name: svc.name,
@@ -256,7 +271,7 @@ async function probeAggregate(services: ServiceDef[]): Promise<CheckResult[]> {
     status: null,
     latencyMs: null,
     attempts,
-    unknown: false,
+    unknown: misconfigured,
     error: reason,
   }));
 }
