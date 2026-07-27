@@ -80,7 +80,35 @@ Reason strings are normalized from the raw failure:
 > **Downtime:** 23 minutes (10:05 → 10:28 UTC)
 > **Checks failed:** 5 · **Now:** HTTP 200 in 41 ms
 
-### 📊 Daily summary (09:00, `TZ` env, default UTC → `#sentinel-reports`)
+### 🟢 Daily uptime report (03:30 UTC / 09:00 IST → `#sentinel-reports`)
+
+Posted as a **thread**, not one long message. The channel gets a one-line verdict; the breakdown lands as replies underneath it. A quiet day is a single line in the channel; a bad day has its whole timeline attached to that same line instead of scattered across separate posts.
+
+**Parent** — `🟢 Sentinel uptime report — Sat, 26 Jul 2026`
+> **99.42%** uptime · 2 incidents · 6/7 services healthy now · 1,284 visits
+> 🚨 *Currently unhealthy:* Runtime
+> Full breakdown in the thread below 🧵
+
+**Reply 1 — Service health.** The fixed-width per-service table (uptime %, incidents, downtime, avg/p95 latency), plus how many services had a perfect window and the total downtime across all of them.
+
+**Reply 2 — Unhealthy services.** Per service: how long it was down, how long it was up, uptime %, incident count. Then a timeline with exact times:
+> • **Billing** went down at **2026-07-26 10:05 UTC**, recovered at **2026-07-26 10:28 UTC** — back up after **23 m**
+>   └ 5 failed checks · `connect ECONNREFUSED ×3 attempts — process or host is down`
+> • **Runtime** went down at **2026-07-26 14:50 UTC** — not recovered yet
+>
+> Mean time to recovery: **23 m** · longest outage: **Billing** 23 m
+
+When nothing failed, this reply is a single ✅ line confirming full uptime rather than an empty section.
+
+**Reply 3 — Frontend traffic.** Visits in the window, the change against the previous window (▲/▼ %), and the top five pages.
+
+**Reply 4 — Monitor coverage.** Only appears when the scheduler missed a meaningful number of ticks; silence means full coverage.
+
+The weekly report uses the identical structure over 7 days, adding the per-service ▲/▼ trend against the previous week to the table and the week-over-week delta to the parent.
+
+`GET /api/slack/test?report=1` posts a sample thread with representative data, so the format can be reviewed without waiting for a real day.
+
+### 📊 Legacy single-message format (superseded)
 
 > **📊 Sentinel daily report — Sat, 26 Jul 2026**
 > Overall: **99.4%** uptime · 1 incident · worst: Billing

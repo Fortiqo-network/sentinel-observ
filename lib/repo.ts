@@ -429,6 +429,16 @@ export async function getTrafficTotals(): Promise<TrafficTotals> {
   return rows[0] ?? { last_hour: 0, last_24h: 0, last_7d: 0, last_30d: 0, all_time: 0 };
 }
 
+/** Visits inside an explicit window, for period-over-period report comparisons. */
+export async function getTrafficBetween(from: Date, to: Date): Promise<number> {
+  const rows = await query<{ views: number }>(
+    `SELECT COUNT(*)::int AS views FROM pageviews
+     WHERE occurred_at >= $1::timestamptz AND occurred_at < $2::timestamptz`,
+    [from, to],
+  );
+  return rows[0]?.views ?? 0;
+}
+
 export type TrafficBucket = { bucket: Date; views: number };
 
 /** Visits per hour over the last 24 h, for the traffic chart. */

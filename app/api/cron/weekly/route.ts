@@ -4,8 +4,8 @@ import { hasDatabase } from "@/lib/db";
 import { ensureSchema } from "@/lib/schema";
 import { recordRun } from "@/lib/repo";
 import { buildPeriodReport, uptimeDelta } from "@/lib/rollup";
-import { weeklyReportMessage } from "@/lib/messages";
-import { isSlackConfigured, postReport } from "@/lib/slack";
+import { collectTraffic, postThreadedReport } from "@/lib/report";
+import { isSlackConfigured } from "@/lib/slack";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -40,17 +40,19 @@ async function handle(req: Request): Promise<NextResponse> {
   ]);
 
   let posted = false;
+  let threadReplies = 0;
   let postError: string | null = null;
   if (isSlackConfigured()) {
-    const result = await postReport(
-      weeklyReportMessage({
-        report,
-        deltas: uptimeDelta(report, previous),
-        previousUptimePct: previous.overallUptimePct,
-      }),
-    );
-    posted = result.ok;
-    if (!result.ok) postError = result.error;
+    const result = await postThreadedReport({
+      report,
+      traffic: await collectTraffic(from, to),
+      period: "weekly",
+      deltas: uptimeDelta(report, previous),
+      previousUptimePct: previous.overallUptimePct,
+    });
+    posted = result.posted;
+    threadReplies = result.threadReplies;
+    postError = result.error;
   } else {
     postError = "Slack is not configured";
   }
@@ -71,6 +73,7 @@ async function handle(req: Request): Promise<NextResponse> {
     incidents: report.totalIncidents,
     mttrSecs: report.mttrSecs,
     posted,
+    threadReplies,
     postError,
   });
 }

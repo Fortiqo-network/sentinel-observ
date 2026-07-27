@@ -4,8 +4,8 @@ import { hasDatabase } from "@/lib/db";
 import { ensureSchema } from "@/lib/schema";
 import { pruneChecks, prunePageviews, recordRun } from "@/lib/repo";
 import { buildPeriodReport, persistDailyRollups } from "@/lib/rollup";
-import { dailyReportMessage } from "@/lib/messages";
-import { isSlackConfigured, postReport } from "@/lib/slack";
+import { collectTraffic, postThreadedReport } from "@/lib/report";
+import { isSlackConfigured } from "@/lib/slack";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -44,11 +44,17 @@ async function handle(req: Request): Promise<NextResponse> {
   const prunedViews = await prunePageviews(PAGEVIEW_RETENTION_DAYS);
 
   let posted = false;
+  let threadReplies = 0;
   let postError: string | null = null;
   if (isSlackConfigured()) {
-    const result = await postReport(dailyReportMessage(report));
-    posted = result.ok;
-    if (!result.ok) postError = result.error;
+    const result = await postThreadedReport({
+      report,
+      traffic: await collectTraffic(from, to),
+      period: "daily",
+    });
+    posted = result.posted;
+    threadReplies = result.threadReplies;
+    postError = result.error;
   } else {
     postError = "Slack is not configured";
   }
@@ -70,6 +76,7 @@ async function handle(req: Request): Promise<NextResponse> {
     prunedChecks: pruned,
     prunedPageviews: prunedViews,
     posted,
+    threadReplies,
     postError,
   });
 }

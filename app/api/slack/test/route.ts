@@ -10,6 +10,7 @@ import {
   type PostResult,
   type SlackIdentity,
 } from "@/lib/slack";
+import { postThreadedReport, sampleReport } from "@/lib/report";
 
 /** Turn a Slack error code into the specific next action, naming the real bot handle. */
 function hintFor(result: PostResult, identity: SlackIdentity | { error: string }): string {
@@ -38,6 +39,14 @@ function hintFor(result: PostResult, identity: SlackIdentity | { error: string }
 
 export const dynamic = "force-dynamic";
 
+const SAMPLE_PATHS = [
+  { label: "/", views: 512 },
+  { label: "/agents", views: 341 },
+  { label: "/agents/acme/summarizer", views: 198 },
+  { label: "/how-it-works", views: 142 },
+  { label: "/login", views: 91 },
+];
+
 /**
  * Credential smoke test for the Slack bot (docs/03-slack-bot-setup.md, step 15).
  *
@@ -65,6 +74,18 @@ async function handle(req: Request): Promise<NextResponse> {
   }
 
   const identity = await whoAmI();
+
+  // ?report=1 posts a sample uptime-report thread so the daily format can be
+  // reviewed (and its Block Kit payloads proven valid) without waiting a day.
+  if (new URL(req.url).searchParams.get("report") === "1") {
+    const now = new Date();
+    const result = await postThreadedReport({
+      report: sampleReport(now),
+      traffic: { views: 1284, previousViews: 1102, topPaths: SAMPLE_PATHS },
+      period: "daily",
+    });
+    return NextResponse.json({ sampleReport: result, bot: identity });
+  }
 
   const alarm = await postAlarm({
     text: "🟢 Sentinel Observ is connected. This is a test message from the alarm channel.",

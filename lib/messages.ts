@@ -212,18 +212,6 @@ function reportTableLines(
   return [heading, ...lines];
 }
 
-function incidentLines(report: PeriodReport, limit: number): string[] {
-  return report.incidents.slice(0, limit).map((incident) => {
-    const end = incident.ended_at
-      ? formatUtcTime(incident.ended_at)
-      : "ongoing";
-    const duration = formatDuration(
-      secondsBetween(incident.started_at, incident.ended_at ?? report.to),
-    );
-    return `• *${serviceName(incident.service_id)}* ${formatUtcTime(incident.started_at)}–${end} (${duration}) — \`${incident.error ?? "unknown"}\``;
-  });
-}
-
 function missedTicksNote(report: PeriodReport): string | null {
   if (report.ticksExpected === 0) return null;
   const missed = report.ticksExpected - report.ticksActual;
@@ -231,85 +219,186 @@ function missedTicksNote(report: PeriodReport): string | null {
   return `⚠️ The monitor itself missed ~${missed} of ${report.ticksExpected} scheduled ticks — check the GitHub Actions schedule.`;
 }
 
-/** 📊 Daily summary. */
-export function dailyReportMessage(report: PeriodReport): SlackPayload {
-  const day = report.from.toUTCString().slice(0, 16);
-  const headline = `Overall *${formatPercent(report.overallUptimePct)}* uptime · ${report.totalIncidents} incident${report.totalIncidents === 1 ? "" : "s"}`;
-  const worst = report.worst ? ` · worst: *${report.worst.name}*` : "";
+/** Traffic figures folded into the daily/weekly report thread. */
+export type TrafficSummary = {
+  views: number;
+  previousViews: number;
+  topPaths: Array<{ label: string; views: number }>;
+};
+
+/**
+ * The parent message of the report thread — deliberately short.
+ *
+ * This is what appears in the channel and in a phone notification, so it
+ * carries only the verdict. Everything else goes in the thread, which keeps
+ * the channel readable when nothing is wrong.
+ */
+export function reportParentMessage(params: {
+  report: PeriodReport;
+  traffic: TrafficSummary | null;
+  period: "daily" | "weekly";
+  previousUptimePct?: number;
+}): SlackPayload {
+  const { report, traffic, period, previousUptimePct } = params;
+  const label = period === "daily" ? report.from.toUTCString().slice(0, 16) : `${report.from.toISOString().slice(0, 10)} → ${report.to.toISOString().slice(0, 10)}`;
+  const down = report.services.filter((s) => s.currentlyDown);
+  const emoji = down.length ? "🔴" : report.totalIncidents > 0 ? "🟡" : "🟢";
+
+  const trend =
+    previousUptimePct === undefined
+      ? ""
+      : (() => {
+          const delta = report.overallUptimePct - previousUptimePct;
+          if (Math.abs(delta) < 0.005) return " (→ flat)";
+          return ` (${delta > 0 ? "▲" : "▼"} ${Math.abs(delta).toFixed(3)} pts)`;
+        })();
+
+  const facts = [
+    `*${formatPercent(report.overallUptimePct)}* uptime${trend}`,
+    `${report.totalIncidents} incident${report.totalIncidents === 1 ? "" : "s"}`,
+    `${report.services.length - down.length}/${report.services.length} services healthy now`,
+  ];
+  if (traffic) facts.push(`${traffic.views.toLocaleString("en-US")} visits`);
 
   const blocks: SlackBlock[] = [
-    header(`📊 Sentinel daily report — ${day}`),
-    section(`${headline}${worst}`),
-    context("```" + reportTableLines(report.services).join("\n") + "```"),
+    header(`${emoji} Sentinel uptime report — ${label}`),
+    section(facts.join(" · ")),
   ];
 
-  const incidents = incidentLines(report, 10);
-  blocks.push(
-    incidents.length
-      ? section(`*Incidents*\n${incidents.join("\n")}`)
-      : context("No incidents in the last 24 hours."),
-  );
+  if (down.length) {
+    blocks.push(
+      section(`:rotating_light: *Currently unhealthy:* ${down.map((s) => s.name).join(", ")}`),
+    );
+  }
 
-  const missed = missedTicksNote(report);
-  if (missed) blocks.push(context(missed));
-
+  blocks.push(context("Full breakdown in the thread below :thread:"));
   const link = dashboardLink();
   if (link) blocks.push(context(link));
 
   return {
-    text: `📊 Sentinel daily report — ${formatPercent(report.overallUptimePct)} uptime, ${report.totalIncidents} incidents`,
+    text: `${emoji} Sentinel uptime report — ${formatPercent(report.overallUptimePct)} uptime, ${report.totalIncidents} incident${report.totalIncidents === 1 ? "" : "s"}${traffic ? `, ${traffic.views.toLocaleString("en-US")} visits` : ""}`,
     blocks,
   };
 }
 
-/** 📈 Weekly summary, with the trend against the previous week. */
-export function weeklyReportMessage(params: {
+/**
+ * The detail posted as replies inside the report thread.
+ *
+ * Split into focused replies rather than one wall of text: on a phone each is
+ * a separate readable card, and "which service was down and for how long"
+ * should never require scrolling past a latency table to find.
+ */
+export function reportThreadMessages(params: {
   report: PeriodReport;
-  deltas: Map<string, number>;
-  previousUptimePct: number;
-}): SlackPayload {
-  const { report, deltas, previousUptimePct } = params;
-  const delta = report.overallUptimePct - previousUptimePct;
-  const arrow = Math.abs(delta) < 0.005 ? "→" : delta > 0 ? "▲" : "▼";
-  const range = `${report.from.toISOString().slice(0, 10)} → ${report.to.toISOString().slice(0, 10)}`;
+  traffic: TrafficSummary | null;
+  deltas?: Map<string, number>;
+}): SlackPayload[] {
+  const { report, traffic, deltas } = params;
+  const messages: SlackPayload[] = [];
+  const windowLabel = formatDuration(report.windowSecs);
 
-  const blocks: SlackBlock[] = [
-    header(`📈 Sentinel weekly report — ${range}`),
-    section(
-      `Overall *${formatPercent(report.overallUptimePct)}* uptime ${arrow} ${Math.abs(delta).toFixed(3)} pts vs last week · ` +
-        `${report.totalIncidents} incident${report.totalIncidents === 1 ? "" : "s"} · ` +
-        `MTTR ${report.mttrSecs !== null ? formatDuration(report.mttrSecs) : "—"}`,
-    ),
-    context("```" + reportTableLines(report.services, deltas).join("\n") + "```"),
-  ];
-
-  if (report.longest && report.longest.ended_at) {
-    blocks.push(
-      section(
-        `*Longest incident:* ${serviceName(report.longest.service_id)} — ` +
-          `${formatDuration(secondsBetween(report.longest.started_at, report.longest.ended_at))} ` +
-          `on ${formatUtc(report.longest.started_at)} (\`${report.longest.error ?? "unknown"}\`)`,
+  // 1 — per-service health.
+  const healthy = report.services.filter((s) => s.downtimeSecs === 0 && !s.currentlyDown);
+  messages.push({
+    text: "Service health",
+    blocks: [
+      section(`*:bar_chart: Service health — last ${windowLabel}*`),
+      context("```" + reportTableLines(report.services, deltas).join("\n") + "```"),
+      context(
+        `${healthy.length} of ${report.services.length} services had a perfect window · ` +
+          `total downtime across all services: *${report.totalDowntimeSecs ? formatDuration(report.totalDowntimeSecs) : "none"}*`,
       ),
-    );
+    ],
+  });
+
+  // 2 — unhealthy periods, with the times and the recovery durations.
+  const unhealthy = report.services.filter((s) => s.downtimeSecs > 0 || s.currentlyDown);
+  if (unhealthy.length || report.incidents.length) {
+    const perService = unhealthy.map((s) => {
+      const upFor = formatDuration(Math.max(0, report.windowSecs - s.downtimeSecs));
+      return (
+        `• *${s.name}* — down *${formatDuration(s.downtimeSecs)}*, up ${upFor} ` +
+        `(${formatPercent(s.uptimePct)}) across ${s.incidents} incident${s.incidents === 1 ? "" : "s"}` +
+        `${s.currentlyDown ? " — *still down*" : ""}`
+      );
+    });
+
+    const timeline = report.incidents.slice(0, 20).map((incident) => {
+      const ongoing = incident.ended_at === null;
+      const duration = formatDuration(
+        secondsBetween(incident.started_at, incident.ended_at ?? report.to),
+      );
+      const recovery = ongoing ? "not recovered yet" : `back up after *${duration}*`;
+      return (
+        `• *${serviceName(incident.service_id)}* went down at *${formatUtc(incident.started_at)}*` +
+        `${ongoing ? "" : `, recovered at *${formatUtc(incident.ended_at!)}*`} — ${recovery}\n` +
+        `   └ ${incident.failed_checks} failed checks · \`${incident.error ?? "unknown"}\``
+      );
+    });
+
+    messages.push({
+      text: "Unhealthy services",
+      blocks: [
+        section(`*:warning: Unhealthy services — last ${windowLabel}*`),
+        ...(perService.length ? [section(perService.join("\n"))] : []),
+        ...(timeline.length
+          ? [section(`*Timeline (all times UTC)*\n${timeline.join("\n")}`)]
+          : []),
+        context(
+          `Mean time to recovery: *${report.mttrSecs !== null ? formatDuration(report.mttrSecs) : "—"}*` +
+            (report.longest?.ended_at
+              ? ` · longest outage: *${serviceName(report.longest.service_id)}* ${formatDuration(secondsBetween(report.longest.started_at, report.longest.ended_at))}`
+              : ""),
+        ),
+      ],
+    });
+  } else {
+    messages.push({
+      text: "No unhealthy services",
+      blocks: [
+        section(`*:white_check_mark: No unhealthy services — last ${windowLabel}*`),
+        context(
+          `Every service answered every check. Full uptime for ${windowLabel} across all ${report.services.length} services.`,
+        ),
+      ],
+    });
   }
 
-  const incidents = incidentLines(report, 15);
-  blocks.push(
-    incidents.length
-      ? section(`*Incidents this week*\n${incidents.join("\n")}`)
-      : context("No incidents this week. 🎉"),
-  );
+  // 3 — traffic.
+  if (traffic) {
+    const delta = traffic.views - traffic.previousViews;
+    const arrow = delta === 0 ? "→" : delta > 0 ? "▲" : "▼";
+    const pct =
+      traffic.previousViews > 0
+        ? ` (${arrow} ${Math.abs(Math.round((delta / traffic.previousViews) * 100))}%)`
+        : "";
+    const top = traffic.topPaths
+      .slice(0, 5)
+      .map((p) => `• \`${p.label}\` — ${p.views.toLocaleString("en-US")}`);
 
+    messages.push({
+      text: "Traffic",
+      blocks: [
+        section(`*:chart_with_upwards_trend: Frontend traffic — last ${windowLabel}*`),
+        fields([
+          ["Visits", `${traffic.views.toLocaleString("en-US")}${pct}`],
+          ["Previous period", traffic.previousViews.toLocaleString("en-US")],
+        ]),
+        ...(top.length ? [section(`*Top pages*\n${top.join("\n")}`)] : []),
+      ],
+    });
+  }
+
+  // 4 — the monitor's own coverage, only when it looks wrong.
   const missed = missedTicksNote(report);
-  if (missed) blocks.push(context(missed));
+  if (missed) {
+    messages.push({
+      text: "Monitor coverage",
+      blocks: [section(`*:mag: Monitor coverage*`), context(missed)],
+    });
+  }
 
-  const link = dashboardLink();
-  if (link) blocks.push(context(link));
-
-  return {
-    text: `📈 Sentinel weekly report — ${formatPercent(report.overallUptimePct)} uptime, ${report.totalIncidents} incidents`,
-    blocks,
-  };
+  return messages;
 }
 
 /** Resolve a service definition for alert copy, tolerating unknown ids. */

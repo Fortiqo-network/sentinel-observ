@@ -6,7 +6,7 @@ A Next.js app deployed on **Vercel** at **https://monitor.fortiqo.xyz** (its own
 
 1. **Checks every Sentinel service every 5 minutes** (health-endpoint probes, 3 attempts before a service counts as down).
 2. **Alerts on Slack in realtime** (`#sentinel-alarms`) the moment a service goes down — which service, why, since when, what it breaks for users, and the first command to run — then posts a threaded recovery message with the exact downtime.
-3. **Posts a daily and a weekly summary** (per-service uptime %, incidents, latency, MTTR, week-over-week trend).
+3. **Posts a daily and weekly uptime report as a Slack thread** — a one-line verdict in the channel, with the breakdown as replies: per-service uptime, exactly when each service went down and how long it took to come back, MTTR, longest outage, and frontend traffic.
 4. Serves a **monitoring dashboard**: live status, 24-hour latency chart, 90-day uptime bars, incident log, per-service drill-down, and the monitor's own liveness.
 5. Counts **every visit to sentinel-frontend**, reported server-side from its edge middleware so ad-blockers cannot undercount, and charts it at `/analytics`.
 
@@ -79,6 +79,7 @@ curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://monitor.fortiqo.xyz
 | `POST /api/cron/daily` | `CRON_SECRET` | Daily report + rollups + prune |
 | `POST /api/cron/weekly` | `CRON_SECRET` | Weekly report with trend and MTTR |
 | `GET /api/slack/test` | `CRON_SECRET` | Post a test message to each configured channel |
+| `GET /api/slack/test?report=1` | `CRON_SECRET` | Post a sample uptime-report thread to preview the daily format |
 
 ## Local development
 
