@@ -20,11 +20,13 @@ async function handle(req: Request): Promise<NextResponse> {
   const denied = requireCronSecret(req);
   if (denied) return denied;
 
+  // Skipped rather than failed when unconfigured — see the note in the daily
+  // route: a daily false alarm is worse than no report.
   if (!hasDatabase()) {
-    return NextResponse.json(
-      { error: "DATABASE_URL not set — reports need persisted history" },
-      { status: 503 },
-    );
+    return NextResponse.json({
+      skipped: true,
+      reason: "DATABASE_URL not set — reports need persisted history",
+    });
   }
 
   const startedAt = Date.now();

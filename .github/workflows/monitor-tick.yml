@@ -72,7 +72,15 @@ jobs:
           JOB: ${{ steps.which.outputs.job }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          text="⚠️ sentinel-observ could not run its ${JOB} job — the platform is currently UNWATCHED. Check ${RUN_URL}"
+          # Severity depends on which job died. Only the health tick failing
+          # means nothing is watching the platform; a report failing is
+          # annoying but leaves detection fully intact. Saying "UNWATCHED" for
+          # both would make the phrase meaningless the first time it mattered.
+          if [ "$JOB" = "check" ]; then
+            text="⚠️ sentinel-observ could not run its health tick — the platform is currently UNWATCHED. Check ${RUN_URL}"
+          else
+            text="⚠️ sentinel-observ could not post its ${JOB} report. Uptime checks and alerting are unaffected. Check ${RUN_URL}"
+          fi
           jq -n --arg c "$SLACK_ALARM_CHANNEL_ID" --arg t "$text" \
             '{channel:$c, text:$t, unfurl_links:false}' \
           | curl -sS -X POST https://slack.com/api/chat.postMessage \

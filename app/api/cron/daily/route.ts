@@ -25,11 +25,16 @@ async function handle(req: Request): Promise<NextResponse> {
   const denied = requireCronSecret(req);
   if (denied) return denied;
 
+  // A missing database is a configuration state, not a job failure. Returning
+  // an error here would fail the scheduler every single day and page the alarm
+  // channel with "the platform is UNWATCHED" — which is both untrue (the health
+  // tick is unaffected) and the fastest way to train people to ignore alerts.
+  // The dashboard's setup checklist already reports this.
   if (!hasDatabase()) {
-    return NextResponse.json(
-      { error: "DATABASE_URL not set — reports need persisted history" },
-      { status: 503 },
-    );
+    return NextResponse.json({
+      skipped: true,
+      reason: "DATABASE_URL not set — reports need persisted history",
+    });
   }
 
   const startedAt = Date.now();
