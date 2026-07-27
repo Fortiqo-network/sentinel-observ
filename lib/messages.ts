@@ -226,6 +226,14 @@ export type TrafficSummary = {
   topPaths: Array<{ label: string; views: number }>;
 };
 
+/** Storage headroom, reported so the free-tier ceiling is never a surprise. */
+export type StorageSummary = {
+  usedBytes: number;
+  limitBytes: number;
+  usedPct: number;
+  tier: string;
+};
+
 /**
  * The parent message of the report thread — deliberately short.
  *
@@ -292,8 +300,9 @@ export function reportThreadMessages(params: {
   report: PeriodReport;
   traffic: TrafficSummary | null;
   deltas?: Map<string, number>;
+  storage?: StorageSummary | null;
 }): SlackPayload[] {
-  const { report, traffic, deltas } = params;
+  const { report, traffic, deltas, storage } = params;
   const messages: SlackPayload[] = [];
   const windowLabel = formatDuration(report.windowSecs);
 
@@ -389,13 +398,29 @@ export function reportThreadMessages(params: {
     });
   }
 
-  // 4 — the monitor's own coverage, only when it looks wrong.
+  // 4 — the monitor's own coverage and storage headroom.
   const missed = missedTicksNote(report);
-  if (missed) {
-    messages.push({
-      text: "Monitor coverage",
-      blocks: [section(`*:mag: Monitor coverage*`), context(missed)],
-    });
+  if (missed || storage) {
+    const blocks: SlackBlock[] = [section("*:mag: Monitor health*")];
+    if (missed) blocks.push(context(missed));
+    if (storage) {
+      const mb = (b: number) => `${(b / (1024 * 1024)).toFixed(1)} MB`;
+      const icon = storage.usedPct >= 92 ? ":red_circle:" : storage.usedPct >= 60 ? ":large_yellow_circle:" : ":large_green_circle:";
+      blocks.push(
+        fields([
+          ["Database", `${icon} ${mb(storage.usedBytes)} of ${mb(storage.limitBytes)} (${storage.usedPct.toFixed(1)}%)`],
+          ["Retention mode", storage.tier],
+        ]),
+      );
+      if (storage.usedPct >= 60) {
+        blocks.push(
+          context(
+            "Retention has tightened automatically to stay inside the free tier. Daily rollups are kept forever, so uptime percentages and visit totals are unaffected — only raw per-check detail is shortened.",
+          ),
+        );
+      }
+    }
+    messages.push({ text: "Monitor health", blocks });
   }
 
   return messages;

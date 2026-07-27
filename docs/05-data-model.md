@@ -77,16 +77,35 @@ CREATE TABLE monitor_runs (
 - `maintenance` windows are recorded but never alert.
 - Latency stats (avg, p95, max) are computed over successful checks only.
 
-## Retention
+## Retention & the storage budget
 
-| Table | Kept | Why |
+The database is a Neon free tier with a hard **500 MB** ceiling, and this app is its only writer. Retention is therefore **measured, not assumed**: the daily job reads `pg_database_size()` and applies the tier matching current usage.
+
+| Usage | Tier | `checks` | raw `pageviews` | `monitor_runs` |
+|---|---|---|---|---|
+| < 60% | normal | 90 d | 180 d | 180 d |
+| 60–80% | reduced | 45 d | 90 d | 90 d |
+| 80–92% | tight | 21 d | 45 d | 45 d |
+| > 92% | emergency | 7 d | 14 d | 14 d |
+
+**Rollup tables are never pruned.** Before raw rows are deleted they are aggregated — `checks` into `daily_rollups`, `pageviews` into `pageview_daily` — so tightening retention costs *detail*, never *history*. Uptime percentages, incident history and visit totals are identical at every tier. This is verified: rolling rows up and deleting the raw ones leaves every reported total, day series and path ranking byte-identical, and re-running changes nothing.
+
+`VACUUM (ANALYZE)` runs after any prune. Without it, deleted rows leave dead tuples still occupying pages, the space never returns, and the next run would prune harder for no benefit.
+
+| Table | Growth | Notes |
 |---|---|---|
-| `checks` | 90 days (pruned in the daily job) | raw drill-down; ~288 rows/day/service × 7 ≈ 2k rows/day — trivial for a free tier |
-| `incidents` | forever | it is the outage history; tiny |
-| `daily_rollups` | forever | powers long ranges at 7 rows/day |
-| `monitor_runs` | forever | ~300 rows/day; the liveness record |
+| `checks` | ~2k rows/day, fixed | 7 services × 288 ticks; grows with time only |
+| `pageviews` | **grows with traffic** | the one unbounded table, and the reason the guard exists |
+| `pageview_daily` | ~1 row per path per day | permanent, negligible |
+| `incidents` | a few rows per outage | permanent |
+| `daily_rollups` | 7 rows/day | permanent |
+| `monitor_runs` | ~300 rows/day | the liveness record |
 
-The 90-day uptime strip reads raw `checks` where they still exist and falls back to `daily_rollups` for pruned days, so history does not develop holes at the retention boundary.
+Set `STORAGE_LIMIT_MB` to change the ceiling if the plan changes. Current usage, the active tier and the per-table breakdown are shown on the dashboard and in the daily Slack thread.
+
+The 90-day uptime strip reads raw `checks` where they still exist and falls back to `daily_rollups` for pruned days, so history does not develop holes at the retention boundary. Traffic queries do the same across `pageviews` and `pageview_daily`.
+
+**Window alignment matters here.** Both sides of those unions filter on UTC calendar-day boundaries, not on `now() - INTERVAL`. Mixing the two makes a visit count differently depending on which table it currently lives in, so a rollup silently changes historical totals — a bug this codebase had and now has a test for.
 
 ## Environment variables (full list)
 

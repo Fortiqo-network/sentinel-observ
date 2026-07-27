@@ -1,5 +1,10 @@
 import { getTrafficBetween, getTrafficBreakdown } from "./repo";
-import { reportParentMessage, reportThreadMessages, type TrafficSummary } from "./messages";
+import {
+  reportParentMessage,
+  reportThreadMessages,
+  type StorageSummary,
+  type TrafficSummary,
+} from "./messages";
 import { postReport, postMessage, reportChannel } from "./slack";
 import type { PeriodReport } from "./rollup";
 
@@ -132,6 +137,7 @@ export async function postThreadedReport(params: {
   period: "daily" | "weekly";
   deltas?: Map<string, number>;
   previousUptimePct?: number;
+  storage?: StorageSummary | null;
 }): Promise<PostedReport> {
   const parent = await postReport(
     reportParentMessage({
@@ -150,6 +156,7 @@ export async function postThreadedReport(params: {
     report: params.report,
     traffic: params.traffic,
     deltas: params.deltas,
+    storage: params.storage,
   });
 
   let delivered = 0;

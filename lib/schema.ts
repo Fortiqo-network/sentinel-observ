@@ -71,6 +71,17 @@ CREATE TABLE IF NOT EXISTS pageviews (
 CREATE INDEX IF NOT EXISTS idx_pageviews_time ON pageviews (occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pageviews_path ON pageviews (path, occurred_at DESC);
 
+-- Per-day visit counts, written before raw pageviews are pruned. Raw rows are
+-- the only table that grows with traffic rather than with time, so they are the
+-- one real threat to the storage budget; rolling them up first means retention
+-- can be tightened aggressively without ever losing the historical counts.
+CREATE TABLE IF NOT EXISTS pageview_daily (
+  day   DATE NOT NULL,
+  path  TEXT NOT NULL,
+  views INT NOT NULL,
+  PRIMARY KEY (day, path)
+);
+
 CREATE TABLE IF NOT EXISTS monitor_runs (
   id             BIGSERIAL PRIMARY KEY,
   ran_at         TIMESTAMPTZ NOT NULL DEFAULT now(),

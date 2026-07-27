@@ -2,17 +2,16 @@ import { NextResponse } from "next/server";
 import { requireCronSecret } from "@/lib/auth";
 import { hasDatabase } from "@/lib/db";
 import { ensureSchema } from "@/lib/schema";
-import { pruneChecks, prunePageviews, recordRun } from "@/lib/repo";
+import { recordRun } from "@/lib/repo";
 import { buildPeriodReport, persistDailyRollups } from "@/lib/rollup";
 import { collectTraffic, postThreadedReport } from "@/lib/report";
 import { isSlackConfigured } from "@/lib/slack";
+import { enforceStorageBudget, formatBytes } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const CHECK_RETENTION_DAYS = 90;
-const PAGEVIEW_RETENTION_DAYS = 365;
 
 /**
  * Daily summary job.
@@ -45,8 +44,11 @@ async function handle(req: Request): Promise<NextResponse> {
   const report = await buildPeriodReport(from, to);
 
   await persistDailyRollups(new Date(to.getTime() - DAY_MS));
-  const pruned = await pruneChecks(CHECK_RETENTION_DAYS);
-  const prunedViews = await prunePageviews(PAGEVIEW_RETENTION_DAYS);
+
+  // Retention is driven by measured storage pressure rather than fixed windows,
+  // so the free tier's 500 MB ceiling is enforced by the system instead of by
+  // someone noticing a full database after writes have already started failing.
+  const storage = await enforceStorageBudget();
 
   let posted = false;
   let threadReplies = 0;
@@ -56,6 +58,12 @@ async function handle(req: Request): Promise<NextResponse> {
       report,
       traffic: await collectTraffic(from, to),
       period: "daily",
+      storage: {
+        usedBytes: storage.after.totalBytes,
+        limitBytes: storage.after.limitBytes,
+        usedPct: storage.after.usedPct,
+        tier: storage.tier.name,
+      },
     });
     posted = result.posted;
     threadReplies = result.threadReplies;
@@ -78,8 +86,22 @@ async function handle(req: Request): Promise<NextResponse> {
     overallUptimePct: report.overallUptimePct,
     incidents: report.totalIncidents,
     ticks: { actual: report.ticksActual, expected: report.ticksExpected },
-    prunedChecks: pruned,
-    prunedPageviews: prunedViews,
+    storage: {
+      used: formatBytes(storage.after.totalBytes),
+      limit: formatBytes(storage.after.limitBytes),
+      usedPct: Number(storage.after.usedPct.toFixed(2)),
+      tier: storage.tier.name,
+      retentionDays: {
+        checks: storage.tier.checks,
+        pageviewsRaw: storage.tier.pageviewsRaw,
+        monitorRuns: storage.tier.monitorRuns,
+      },
+      reclaimed: formatBytes(Math.max(0, storage.before.totalBytes - storage.after.totalBytes)),
+      pageviewsRolledUp: storage.pageviewsRolledUp,
+      checksPruned: storage.checksPruned,
+      runsPruned: storage.runsPruned,
+      stillOverBudget: storage.stillOverBudget,
+    },
     posted,
     threadReplies,
     postError,

@@ -12,6 +12,7 @@ import {
   type IncidentRow,
   type LatencyPoint,
 } from "./repo";
+import { getStorageUsage, type StorageUsage } from "./storage";
 import { probeAll, type CheckResult } from "./probe";
 import { SERVICES, type ServiceDef } from "./services";
 import { secondsBetween, uptimePercent } from "./format";
@@ -73,6 +74,7 @@ export type DashboardData = {
   latency: LatencyPoint[];
   daily: DailyPoint[];
   monitor: MonitorHealth;
+  storage: StorageUsage | null;
 };
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -110,6 +112,7 @@ export async function getDashboard(): Promise<DashboardData> {
       latency: [],
       daily: [],
       monitor: emptyMonitorHealth(),
+      storage: null,
     };
   }
 
@@ -119,7 +122,7 @@ export async function getDashboard(): Promise<DashboardData> {
   const since7d = new Date(now.getTime() - 7 * DAY_MS);
   const since30d = new Date(now.getTime() - 30 * DAY_MS);
 
-  const [states, stats24h, down24h, down7d, down30d, incidents, latency, daily, runs] =
+  const [states, stats24h, down24h, down7d, down30d, incidents, latency, daily, runs, storage] =
     await Promise.all([
       getServiceStates(),
       getWindowStats(since24h),
@@ -130,6 +133,8 @@ export async function getDashboard(): Promise<DashboardData> {
       getLatencySeries(since24h, LATENCY_BUCKET_MINUTES),
       getDailySeries(UPTIME_HISTORY_DAYS),
       getRuns(since24h),
+      // Never let a storage-stat failure blank the whole dashboard.
+      getStorageUsage().catch(() => null),
     ]);
 
   const statsById = new Map(stats24h.map((s) => [s.service_id, s]));
@@ -215,6 +220,7 @@ export async function getDashboard(): Promise<DashboardData> {
         : null,
       alertsSent24h: runs.reduce((sum, r) => sum + r.alerts_sent, 0),
     },
+    storage,
   };
 }
 

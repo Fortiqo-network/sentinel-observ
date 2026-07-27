@@ -6,6 +6,7 @@ import { ConfigChecklist } from "@/components/dashboard/ConfigChecklist";
 import { ServiceCard } from "@/components/dashboard/ServiceCard";
 import { IncidentList } from "@/components/dashboard/IncidentList";
 import { MonitorHealthPanel } from "@/components/dashboard/MonitorHealthPanel";
+import { StoragePanel } from "@/components/dashboard/StoragePanel";
 import { LatencyChart } from "@/components/charts/LatencyChart";
 import { UptimeBars } from "@/components/charts/UptimeBars";
 import { Panel } from "@/components/ui/Panel";
@@ -143,7 +144,10 @@ export default async function OverviewPage(): Promise<React.JSX.Element> {
           <IncidentList incidents={data.incidents.slice(0, 8)} now={data.generatedAt} />
         </Panel>
 
-        <MonitorHealthPanel monitor={data.monitor} now={data.generatedAt} />
+        <div className="space-y-6">
+          <MonitorHealthPanel monitor={data.monitor} now={data.generatedAt} />
+          {data.storage && <StoragePanel usage={data.storage} />}
+        </div>
       </div>
 
       <Panel eyebrow="Detail" title="Per-service metrics" bodyClassName="px-0 py-0">

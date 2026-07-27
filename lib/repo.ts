@@ -415,16 +415,40 @@ export type TrafficTotals = {
   all_time: number;
 };
 
-/** Visit counts over the standard windows, in one pass over the index. */
+/**
+ * Visit counts over the standard windows.
+ *
+ * Raw rows and the `pageview_daily` rollup are summed together. They never
+ * overlap — a day only reaches the rollup once its raw rows have been deleted —
+ * so tightening raw retention under storage pressure loses detail but never
+ * changes these totals.
+ */
 export async function getTrafficTotals(): Promise<TrafficTotals> {
   const rows = await query<TrafficTotals>(
-    `SELECT
-       (COUNT(*) FILTER (WHERE occurred_at >= now() - INTERVAL '1 hour'))::int  AS last_hour,
-       (COUNT(*) FILTER (WHERE occurred_at >= now() - INTERVAL '24 hours'))::int AS last_24h,
-       (COUNT(*) FILTER (WHERE occurred_at >= now() - INTERVAL '7 days'))::int   AS last_7d,
-       (COUNT(*) FILTER (WHERE occurred_at >= now() - INTERVAL '30 days'))::int  AS last_30d,
-       COUNT(*)::int AS all_time
-     FROM pageviews`,
+    `WITH bounds AS (
+       SELECT ((CURRENT_DATE - 6)::timestamp AT TIME ZONE 'UTC')  AS d7_at,
+              ((CURRENT_DATE - 29)::timestamp AT TIME ZONE 'UTC') AS d30_at,
+              (CURRENT_DATE - 6)  AS d7_day,
+              (CURRENT_DATE - 29) AS d30_day
+     ), raw AS (
+       SELECT COUNT(*) FILTER (WHERE occurred_at >= now() - INTERVAL '1 hour')   AS h1,
+              COUNT(*) FILTER (WHERE occurred_at >= now() - INTERVAL '24 hours') AS d1,
+              COUNT(*) FILTER (WHERE occurred_at >= bounds.d7_at)                AS d7,
+              COUNT(*) FILTER (WHERE occurred_at >= bounds.d30_at)               AS d30,
+              COUNT(*) AS total
+       FROM pageviews, bounds
+     ), rolled AS (
+       SELECT COALESCE(SUM(views) FILTER (WHERE day >= bounds.d7_day), 0)  AS d7,
+              COALESCE(SUM(views) FILTER (WHERE day >= bounds.d30_day), 0) AS d30,
+              COALESCE(SUM(views), 0) AS total
+       FROM pageview_daily, bounds
+     )
+     SELECT raw.h1::int AS last_hour,
+            raw.d1::int AS last_24h,
+            (raw.d7 + rolled.d7)::int AS last_7d,
+            (raw.d30 + rolled.d30)::int AS last_30d,
+            (raw.total + rolled.total)::int AS all_time
+     FROM raw, rolled`,
   );
   return rows[0] ?? { last_hour: 0, last_24h: 0, last_7d: 0, last_30d: 0, all_time: 0 };
 }
@@ -453,26 +477,61 @@ export async function getTrafficByHour(): Promise<TrafficBucket[]> {
 
 export type TrafficDay = { day: string; views: number };
 
-/** Visits per UTC day over a window, for the bar chart. */
+/** Visits per UTC day over a window, combining raw rows with the rollup. */
 export async function getTrafficByDay(days: number): Promise<TrafficDay[]> {
   return query<TrafficDay>(
-    `SELECT to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, COUNT(*)::int AS views
-     FROM pageviews
-     WHERE occurred_at >= now() - ($1::int * INTERVAL '1 day')
-     GROUP BY 1 ORDER BY 1 ASC`,
+    `WITH bounds AS (
+       SELECT (CURRENT_DATE - ($1::int - 1)) AS from_day,
+              ((CURRENT_DATE - ($1::int - 1))::timestamp AT TIME ZONE 'UTC') AS from_at
+     ), combined AS (
+       SELECT to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, 1 AS views
+       FROM pageviews, bounds
+       WHERE occurred_at >= bounds.from_at
+       UNION ALL
+       SELECT to_char(day, 'YYYY-MM-DD') AS day, views
+       FROM pageview_daily, bounds
+       WHERE day >= bounds.from_day
+     )
+     SELECT day, SUM(views)::int AS views FROM combined GROUP BY day ORDER BY day ASC`,
     [days],
   );
 }
 
 export type TrafficBreakdown = { label: string; views: number };
 
-/** Top values of one dimension over a window. */
+/**
+ * Top values of one dimension over a window.
+ *
+ * Paths also read the rollup, so the ranking stays complete after raw rows are
+ * pruned. Referrer and country are only rolled up implicitly (not at all), so
+ * those two are limited to whatever raw retention the current storage tier
+ * allows — a deliberate trade: keeping three dimensions in the rollup would
+ * multiply its row count for far less analytical value.
+ */
 export async function getTrafficBreakdown(
   dimension: "path" | "referrer_host" | "country",
   days: number,
   limit = 10,
 ): Promise<TrafficBreakdown[]> {
-  const column = { path: "path", referrer_host: "referrer_host", country: "country" }[dimension];
+  if (dimension === "path") {
+    return query<TrafficBreakdown>(
+      `WITH bounds AS (
+         SELECT (CURRENT_DATE - ($1::int - 1)) AS from_day,
+                ((CURRENT_DATE - ($1::int - 1))::timestamp AT TIME ZONE 'UTC') AS from_at
+       ), combined AS (
+         SELECT COALESCE(path, 'unknown') AS label, 1 AS views
+         FROM pageviews, bounds WHERE occurred_at >= bounds.from_at
+         UNION ALL
+         SELECT COALESCE(path, 'unknown') AS label, views
+         FROM pageview_daily, bounds WHERE day >= bounds.from_day
+       )
+       SELECT label, SUM(views)::int AS views FROM combined
+       GROUP BY label ORDER BY views DESC LIMIT $2`,
+      [days, limit],
+    );
+  }
+
+  const column = dimension === "referrer_host" ? "referrer_host" : "country";
   return query<TrafficBreakdown>(
     `SELECT COALESCE(${column}, 'unknown') AS label, COUNT(*)::int AS views
      FROM pageviews
@@ -480,17 +539,6 @@ export async function getTrafficBreakdown(
      GROUP BY 1 ORDER BY views DESC LIMIT $2`,
     [days, limit],
   );
-}
-
-/** Drop pageviews older than the retention window. Returns rows removed. */
-export async function prunePageviews(retentionDays: number): Promise<number> {
-  const rows = await query<{ removed: number }>(
-    `WITH deleted AS (
-       DELETE FROM pageviews WHERE occurred_at < now() - ($1::int * INTERVAL '1 day') RETURNING 1
-     ) SELECT COUNT(*)::int AS removed FROM deleted`,
-    [retentionDays],
-  );
-  return rows[0]?.removed ?? 0;
 }
 
 // ── Rollup maintenance (daily job) ────────────────────────────────────────────
@@ -534,13 +582,3 @@ export async function writeDailyRollups(
   }
 }
 
-/** Drop raw checks older than the retention window. Returns rows removed. */
-export async function pruneChecks(retentionDays: number): Promise<number> {
-  const rows = await query<{ removed: number }>(
-    `WITH deleted AS (
-       DELETE FROM checks WHERE checked_at < now() - ($1::int * INTERVAL '1 day') RETURNING 1
-     ) SELECT COUNT(*)::int AS removed FROM deleted`,
-    [retentionDays],
-  );
-  return rows[0]?.removed ?? 0;
-}
