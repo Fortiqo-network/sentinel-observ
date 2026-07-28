@@ -11,6 +11,7 @@ import { PageShell } from "@/components/layout/PageShell";
 import { Panel } from "@/components/ui/Panel";
 import { StatTile } from "@/components/ui/StatTile";
 import { BreakdownBars, TrafficChart } from "@/components/charts/TrafficChart";
+import { HoverBars } from "@/components/charts/HoverBars";
 
 export const dynamic = "force-dynamic";
 
@@ -93,16 +94,16 @@ export default async function AnalyticsPage(): Promise<React.JSX.Element> {
           </span>
         }
       >
-        <div className="flex h-[160px] items-end gap-[3px]">
-          {days.map((day) => (
-            <div
-              key={day.day}
-              title={`${day.day} — ${day.views} view${day.views === 1 ? "" : "s"}`}
-              className="flex-1 rounded-t-[2px] bg-sentinel-400/60 transition hover:bg-sentinel-400"
-              style={{ height: `${Math.max(day.views === 0 ? 0 : 3, (day.views / peakDay) * 100)}%` }}
-            />
-          ))}
-        </div>
+        <HoverBars
+          heightClass="h-[160px]"
+          bars={days.map((day) => ({
+            key: day.day,
+            fraction: day.views / peakDay,
+            className: "bg-sentinel-400/60",
+            label: day.day,
+            value: `${day.views.toLocaleString("en-US")} ${day.views === 1 ? "visit" : "visits"}`,
+          }))}
+        />
         <div className="mt-2 flex items-center justify-between font-brand-mono text-[10px] uppercase tracking-[0.14em] text-graphite">
           <span>{days[0].day}</span>
           <span>today</span>

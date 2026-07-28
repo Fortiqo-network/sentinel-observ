@@ -380,6 +380,22 @@ export async function getRecentChecks(serviceId: string, limit: number): Promise
   );
 }
 
+/**
+ * When a job of this kind last completed, or null if it never has.
+ *
+ * Used to decide whether a periodic report is overdue. Reports are driven by
+ * "has it been done recently?" rather than "did the scheduler fire at 03:30?",
+ * because external schedulers drop and delay runs and a missed minute must not
+ * cost a whole day's report.
+ */
+export async function getLastRunAt(kind: string): Promise<Date | null> {
+  const row = await queryOne<{ ran_at: Date }>(
+    `SELECT ran_at FROM monitor_runs WHERE kind = $1 ORDER BY ran_at DESC LIMIT 1`,
+    [kind],
+  );
+  return row?.ran_at ?? null;
+}
+
 /** Cron runs in a window, used for the monitor's own liveness panel. */
 export async function getRuns(since: Date, kind = "check"): Promise<MonitorRunRow[]> {
   return query<MonitorRunRow>(

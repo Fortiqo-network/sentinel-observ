@@ -66,7 +66,22 @@ jobs:
 ```
 
 - Daily (`30 3 * * *`) and weekly (`30 3 * * 1`) summary triggers: same pattern, two more schedule entries hitting `/api/cron/daily` and `/api/cron/weekly`. GitHub cron is UTC, so 03:30 UTC is 09:00 IST. (These two *would* fit in Hobby's Vercel Cron allowance; keeping all three in GitHub Actions keeps one mechanism.) The shipped workflow uses `if: github.event.schedule == …` to route each schedule to its own job, plus a `workflow_dispatch` input to run any of the three by hand.
-- GitHub schedules can drift a few minutes under load — acceptable for a 5-min health cadence. The uptime math (doc 05) is based on actual check timestamps, not assumed intervals, so drift doesn't corrupt the numbers.
+> **⚠️ Measured reality (2026-07-28): GitHub Actions is not a reliable 5-minute scheduler.**
+> Over the first 19 hours of live operation it delivered **12 ticks instead of ~228** — roughly one
+> per hour, with gaps up to 2.5 hours — and dropped the `30 3 * * *` daily entry entirely. GitHub
+> throttles and discards short-interval schedules under load; this is documented behaviour, but the
+> severity is far beyond the "few minutes of drift" originally assumed here.
+>
+> Two consequences, both now addressed:
+> 1. **Detection time is only as good as the trigger.** For a true ≤6-minute detection window, drive
+>    `/api/cron/check` from a dedicated cron service (cron-job.org, EasyCron and similar are free at
+>    1-minute resolution and support the `Authorization` header). Keep the GitHub workflow as a
+>    backstop — two independent triggers are strictly better than one, and the tick is idempotent.
+> 2. **Reports no longer depend on a schedule firing at an exact minute.** Every health tick asks
+>    "is a report overdue?" (`lib/jobs.ts`) and produces it if so. Any tick after 03:30 UTC yields
+>    the daily report, so a dropped schedule delays it rather than losing it.
+
+- The uptime math (doc 05) is based on actual check timestamps, not assumed intervals, so scheduler drift never corrupts the numbers — a missed tick shows as a gap, never as fake downtime.
 - If the project is ever on Vercel Pro, delete the workflow and move all three schedules into `vercel.json` — endpoints are identical.
 
 ## System diagram

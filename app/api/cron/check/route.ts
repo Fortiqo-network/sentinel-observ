@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCronSecret } from "@/lib/auth";
 import { runCheckTick } from "@/lib/tick";
+import { runDueReports } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -19,7 +20,12 @@ async function handle(req: Request): Promise<NextResponse> {
 
   try {
     const summary = await runCheckTick();
-    return NextResponse.json(summary);
+    // Reports piggyback on the tick so they survive a scheduler that drops
+    // most of its runs. Never allowed to fail the tick itself.
+    const reports = await runDueReports();
+    return NextResponse.json(
+      Object.keys(reports).length ? { ...summary, reports } : summary,
+    );
   } catch (err) {
     return NextResponse.json(
       { error: "tick failed", detail: err instanceof Error ? err.message : String(err) },

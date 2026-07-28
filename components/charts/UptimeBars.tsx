@@ -1,5 +1,5 @@
-import { cn } from "@/lib/utils/cn";
 import type { DailyPoint } from "@/lib/repo";
+import { HoverBars, type HoverBar } from "./HoverBars";
 
 /**
  * The 90-day uptime strip — one bar per day, green when every check passed,
@@ -57,23 +57,27 @@ export function UptimeBars({
   const withData = cells.filter((c) => c.total > 0);
   const firstDay = withData[0]?.day;
 
+  const bars: HoverBar[] = cells.map((cell) => {
+    const tone = toneFor(cell);
+    const uptime = cell.total > 0 ? ((cell.total - cell.failed) / cell.total) * 100 : null;
+    return {
+      key: cell.day,
+      // Uptime bars are categorical, not proportional: a full-height bar coloured
+      // by outcome reads far faster than 99% vs 100% height differences.
+      fraction: 1,
+      className: tone.className,
+      label: cell.day,
+      value: uptime === null ? "No data" : `${uptime.toFixed(uptime === 100 ? 0 : 2)}% up`,
+      detail:
+        cell.total === 0
+          ? "the monitor was not running"
+          : `${cell.total - cell.failed}/${cell.total} checks passed`,
+    };
+  });
+
   return (
     <div className={className}>
-      <div className={cn("flex items-stretch gap-[2px]", height)}>
-        {cells.map((cell) => {
-          const tone = toneFor(cell);
-          return (
-            <div
-              key={cell.day}
-              title={`${cell.day} — ${tone.label}${cell.total ? ` (${cell.total - cell.failed}/${cell.total} checks ok)` : ""}`}
-              className={cn(
-                "min-w-[2px] flex-1 rounded-[2px] transition-opacity hover:opacity-70",
-                tone.className,
-              )}
-            />
-          );
-        })}
-      </div>
+      <HoverBars bars={bars} heightClass={height} minBarPct={100} />
       <div className="mt-2 flex items-center justify-between font-brand-mono text-[10px] uppercase tracking-[0.14em] text-graphite">
         <span>{firstDay ?? `${days} days ago`}</span>
         <span>{withData.length} days recorded</span>

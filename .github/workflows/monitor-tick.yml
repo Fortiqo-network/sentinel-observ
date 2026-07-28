@@ -1,7 +1,15 @@
 name: monitor
 
-# Vercel Cron on the Hobby plan only fires once per day, so the 5-minute
-# cadence comes from here instead. Cron times are UTC.
+# Vercel Cron on the Hobby plan only fires once per day, so the cadence comes
+# from here instead. Cron times are UTC.
+#
+# TREAT THIS AS A BACKSTOP, NOT THE PRIMARY TRIGGER. Measured over the first 19
+# hours of live operation, GitHub delivered 12 of ~228 expected ticks and
+# dropped the daily entry entirely — it throttles short-interval schedules hard.
+# For a real ≤6-minute detection window, also point a dedicated cron service
+# (cron-job.org and similar are free, 1-minute resolution, support custom
+# headers) at /api/cron/check. The tick is idempotent, so overlapping triggers
+# are harmless: the state machine alerts on transitions, not on runs.
 #
 # On Mondays at 03:30 UTC two entries match, so GitHub starts two runs — one
 # per schedule string. That is intended: the weekly report is a separate run
