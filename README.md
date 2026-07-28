@@ -9,6 +9,16 @@ A Next.js app deployed on **Vercel** at **https://monitor.fortiqo.xyz** (its own
 3. **Posts a daily and weekly uptime report as a Slack thread** — a one-line verdict in the channel, with the breakdown as replies: per-service uptime, exactly when each service went down and how long it took to come back, MTTR, longest outage, and frontend traffic.
 4. Serves a **monitoring dashboard**: live status, 24-hour latency chart, 90-day uptime bars, incident log, per-service drill-down, and the monitor's own liveness.
 5. Counts **every visit to sentinel-frontend**, reported server-side from its edge middleware so ad-blockers cannot undercount, and charts it at `/analytics`.
+6. Watches the **money path** — metering-stream backlog and stranded settlements — because a platform can be 7/7 green while nobody is being billed and no seller is being paid.
+
+### Why the money path is monitored separately
+
+Liveness probes answer "is the process running?". Two failures pass every one of them:
+
+- **the metering consumer dies** — the gateway keeps writing signed usage events, agents keep executing, calls return 200, and nothing is ever billed;
+- **the settlement reaper stalls** — buyer funds stay held and sellers are never paid. The reserve path is fail-closed by design, so this looks healthy right up until someone's balance is wrong.
+
+Billing computes both in `GET /v1/ops/money-health`; the gateway relays it; this app records it, shows it on the dashboard, and alerts **on transition** (never every five minutes). Thresholds derive from billing's own `settlement_ttl_hours` and `settlement_confirm_window_hours`, so retuning the state machine automatically retunes the monitoring.
 
 The dashboard is **private** — password-protected via `middleware.ts` and excluded from every search index. The scheduler, Slack test and pageview-ingest endpoints are exempt from the login wall because they authenticate with their own secrets.
 

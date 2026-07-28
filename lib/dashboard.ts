@@ -13,6 +13,7 @@ import {
   type LatencyPoint,
 } from "./repo";
 import { getStorageUsage, type StorageUsage } from "./storage";
+import { getLatestMoneyHealth, type MoneySnapshot } from "./money";
 import { probeAll, type CheckResult } from "./probe";
 import { SERVICES, type ServiceDef } from "./services";
 import { secondsBetween, uptimePercent } from "./format";
@@ -75,6 +76,7 @@ export type DashboardData = {
   daily: DailyPoint[];
   monitor: MonitorHealth;
   storage: StorageUsage | null;
+  money: MoneySnapshot | null;
 };
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -113,6 +115,7 @@ export async function getDashboard(): Promise<DashboardData> {
       daily: [],
       monitor: emptyMonitorHealth(),
       storage: null,
+      money: null,
     };
   }
 
@@ -136,6 +139,7 @@ export async function getDashboard(): Promise<DashboardData> {
       // Never let a storage-stat failure blank the whole dashboard.
       getStorageUsage().catch(() => null),
     ]);
+  const money = await getLatestMoneyHealth().catch(() => null);
 
   const statsById = new Map(stats24h.map((s) => [s.service_id, s]));
   const down24hById = new Map(down24h.map((d) => [d.service_id, d]));
@@ -221,6 +225,7 @@ export async function getDashboard(): Promise<DashboardData> {
       alertsSent24h: runs.reduce((sum, r) => sum + r.alerts_sent, 0),
     },
     storage,
+    money,
   };
 }
 

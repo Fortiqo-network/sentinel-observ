@@ -82,6 +82,20 @@ CREATE TABLE IF NOT EXISTS pageview_daily (
   PRIMARY KEY (day, path)
 );
 
+-- Money-path health snapshots (metering backlog, stranded settlements, ledger
+-- drift). Kept separate from the checks table because it answers a different
+-- question: not "is the service up?" but "is money still moving?" — a service
+-- can be perfectly up while neither buyers are billed nor sellers are paid.
+CREATE TABLE IF NOT EXISTS money_health (
+  id         BIGSERIAL PRIMARY KEY,
+  checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ok         BOOLEAN NOT NULL,
+  reachable  BOOLEAN NOT NULL DEFAULT true,
+  summary    TEXT NOT NULL,
+  payload    JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_money_health_time ON money_health (checked_at DESC);
+
 CREATE TABLE IF NOT EXISTS monitor_runs (
   id             BIGSERIAL PRIMARY KEY,
   ran_at         TIMESTAMPTZ NOT NULL DEFAULT now(),

@@ -20,12 +20,21 @@ import {
 import { classify, detectStorm } from "./state";
 import {
   downMessage,
+  moneyDownMessage,
+  moneyRecoveredMessage,
   recoveryMessage,
   reminderMessage,
   serviceForAlert,
   stormMessage,
 } from "./messages";
 import { isSlackConfigured, postAlarm } from "./slack";
+import {
+  fetchMoneyHealth,
+  getPreviousMoneyOk,
+  isMoneyMonitoringConfigured,
+  recordMoneyHealth,
+  summarize,
+} from "./money";
 
 /**
  * One monitoring tick: probe → persist → decide → alert.
@@ -45,6 +54,7 @@ export type TickSummary = {
   alertsSent: number;
   alertErrors: string[];
   transitions: Array<{ service: string; kind: string }>;
+  money?: { ok: boolean; summary: string };
 };
 
 function syntheticResult(incident: IncidentRow, ok: boolean): CheckResult {
@@ -159,6 +169,50 @@ async function flushPendingAlerts(results: Map<string, CheckResult>): Promise<{
   }
 
   return { sent, errors };
+}
+
+/**
+ * Check whether money is still moving, and alert on a change of state.
+ *
+ * Alerts fire on transition only, exactly like service outages — a money path
+ * that stays broken for a day must not post every five minutes. Any failure
+ * here is recorded and swallowed: this runs after the service checks have
+ * already been persisted, and must never cost us an outage alert.
+ */
+async function checkMoneyPath(
+  now: Date,
+  slackReady: boolean,
+  summary: TickSummary,
+): Promise<void> {
+  if (!isMoneyMonitoringConfigured()) return;
+
+  try {
+    const health = await fetchMoneyHealth();
+    if (!health) return;
+
+    const previousOk = await getPreviousMoneyOk(now);
+    await recordMoneyHealth(health, now);
+    summary.money = { ok: health.ok, summary: summarize(health) };
+
+    // No previous reading is the baseline: record it, never page on it.
+    if (previousOk === null || !slackReady) return;
+
+    if (previousOk && !health.ok) {
+      const posted = await postAlarm(
+        moneyDownMessage({ summary: summarize(health), health, at: now }),
+      );
+      if (posted.ok) summary.alertsSent += 1;
+      else summary.alertErrors.push(`money alert: ${posted.error}`);
+    } else if (!previousOk && health.ok) {
+      const posted = await postAlarm(moneyRecoveredMessage({ at: now, downSince: null }));
+      if (posted.ok) summary.alertsSent += 1;
+      else summary.alertErrors.push(`money recovery: ${posted.error}`);
+    }
+  } catch (err) {
+    summary.alertErrors.push(
+      `money check: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 /**
@@ -355,6 +409,8 @@ export async function runCheckTick(): Promise<TickSummary> {
     summary.alertsSent += flushed.sent;
     summary.alertErrors.push(...flushed.errors);
   }
+
+  await checkMoneyPath(now, slackReady, summary);
 
   summary.durationMs = Date.now() - startedAt;
 

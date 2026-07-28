@@ -426,6 +426,72 @@ export function reportThreadMessages(params: {
   return messages;
 }
 
+/**
+ * 💸 The money path stopped working, while every service stayed up.
+ *
+ * Deliberately worded to make that distinction the headline: an on-call
+ * responder who reads "all services healthy" and stops there will miss the
+ * fact that nobody is being billed.
+ */
+export function moneyDownMessage(params: {
+  summary: string;
+  health: {
+    metering?: { pending: number; stream_length: number; consumers: number } | undefined;
+    settlements?: { stuck_reserved: number; held_rows: number; held_units: number } | undefined;
+  };
+  at: Date;
+}): SlackPayload {
+  const { summary, health, at } = params;
+  const blocks: SlackBlock[] = [
+    header("💸 MONEY PATH DEGRADED"),
+    section(`*${summary}*`),
+    fields([
+      ["Detected", formatUtc(at)],
+      [
+        "Unacked metering events",
+        health.metering ? health.metering.pending.toLocaleString("en-US") : "—",
+      ],
+      [
+        "Settlements holding funds",
+        health.settlements
+          ? `${health.settlements.held_rows} (${health.settlements.held_units.toLocaleString("en-US")} units)`
+          : "—",
+      ],
+      ["Metering consumers", health.metering ? String(health.metering.consumers) : "—"],
+    ]),
+    context(
+      "*Every service can still be UP while this is broken* — calls execute and return 200, but buyers are not billed and sellers are not paid.",
+    ),
+    context(
+      "*Check:* `docker logs sentinel-billing --tail 100` · is the Celery worker running (`drain_metering_stream`, settlement reaper)?",
+    ),
+  ];
+
+  const link = dashboardLink();
+  if (link) blocks.push(context(link));
+
+  return { text: `💸 MONEY PATH DEGRADED — ${summary}`, blocks };
+}
+
+/** 💚 The money path recovered. */
+export function moneyRecoveredMessage(params: { at: Date; downSince: Date | null }): SlackPayload {
+  const duration = params.downSince
+    ? formatDuration(secondsBetween(params.downSince, params.at))
+    : null;
+  return {
+    text: `💚 Money path recovered${duration ? ` after ${duration}` : ""}`,
+    blocks: [
+      header("💚 Money path RECOVERED"),
+      section(
+        `Metering is draining and no settlements are stranded${duration ? ` — degraded for *${duration}*` : ""}.`,
+      ),
+      context(
+        "Confirm nothing was lost: the metering stream is at-least-once, so a backlog drains rather than disappears.",
+      ),
+    ],
+  };
+}
+
 /** Resolve a service definition for alert copy, tolerating unknown ids. */
 export function serviceForAlert(serviceId: string): ServiceDef {
   return (

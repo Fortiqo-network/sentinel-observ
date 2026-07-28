@@ -152,9 +152,10 @@ export async function enforceStorageBudget(): Promise<EnforcementResult> {
   const pageviewsRolledUp = await rollUpPageviews(tier.pageviewsRaw);
   const checksPruned = await pruneTable("checks", "checked_at", tier.checks);
   const runsPruned = await pruneTable("monitor_runs", "ran_at", tier.monitorRuns);
+  await pruneTable("money_health", "checked_at", tier.monitorRuns);
 
   if (pageviewsRolledUp + checksPruned + runsPruned > 0) {
-    await query("VACUUM (ANALYZE) checks, pageviews, monitor_runs");
+    await query("VACUUM (ANALYZE) checks, pageviews, monitor_runs, money_health");
   }
 
   const after = await getStorageUsage();
