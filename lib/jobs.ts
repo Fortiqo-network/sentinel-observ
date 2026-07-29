@@ -1,6 +1,6 @@
 import { hasDatabase } from "./db";
 import { ensureSchema } from "./schema";
-import { getLastRunAt, recordRun } from "./repo";
+import { claimReportPeriod, getLastRunAt, recordRun, releaseReportPeriod } from "./repo";
 import { buildPeriodReport, persistDailyRollups, uptimeDelta } from "./rollup";
 import { collectTraffic, postThreadedReport } from "./report";
 import { isSlackConfigured } from "./slack";
@@ -28,6 +28,25 @@ function anchorFor(now: Date): Date {
   return new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), ANCHOR_HOUR, ANCHOR_MINUTE),
   );
+}
+
+/** The period a daily report belongs to: the UTC date of its anchor. */
+function dailyPeriodKey(now: Date): string {
+  return now.toISOString().slice(0, 10);
+}
+
+/**
+ * The period a weekly report belongs to: the UTC date of that week's Monday.
+ * Keying on the week rather than "7 days since the last one" means a late run
+ * still lands in the right bucket instead of shifting every subsequent week.
+ */
+function weeklyPeriodKey(now: Date): string {
+  const monday = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const dayOfWeek = (monday.getUTCDay() + 6) % 7;
+  monday.setUTCDate(monday.getUTCDate() - dayOfWeek);
+  return monday.toISOString().slice(0, 10);
 }
 
 /**
@@ -58,8 +77,17 @@ export type JobResult = {
   details?: Record<string, unknown>;
 };
 
-/** Build and post the daily uptime report, then enforce the storage budget. */
-export async function runDailyReport(now = new Date()): Promise<JobResult> {
+/**
+ * Build and post the daily uptime report, then enforce the storage budget.
+ *
+ * Exactly-once per UTC day unless `force` is set. Both the health tick's
+ * overdue check and a (possibly hours-late) scheduled call land here, so the
+ * period claim — not the caller — is what prevents a duplicate.
+ */
+export async function runDailyReport(
+  now = new Date(),
+  { force = false }: { force?: boolean } = {},
+): Promise<JobResult> {
   if (!hasDatabase()) {
     return { ran: false, skipped: "DATABASE_URL not set — reports need persisted history" };
   }
@@ -67,12 +95,34 @@ export async function runDailyReport(now = new Date()): Promise<JobResult> {
   const startedAt = Date.now();
   await ensureSchema();
 
+  const periodKey = dailyPeriodKey(now);
+  if (!force) {
+    // Two guards, deliberately. The due check reads history, which also covers
+    // periods produced before claims existed; the claim is atomic, which is what
+    // actually stops two simultaneous callers. Neither alone is sufficient.
+    if (!(await isDailyDue(now))) {
+      return { ran: false, skipped: `daily report for ${periodKey} was already produced` };
+    }
+    if (!(await claimReportPeriod("daily", periodKey))) {
+      return { ran: false, skipped: `daily report for ${periodKey} is already being produced` };
+    }
+  }
+
   const to = now;
   const from = new Date(to.getTime() - DAY_MS);
-  const report = await buildPeriodReport(from, to);
 
-  await persistDailyRollups(new Date(to.getTime() - DAY_MS));
-  const storage = await enforceStorageBudget();
+  let report;
+  let storage;
+  try {
+    report = await buildPeriodReport(from, to);
+    await persistDailyRollups(new Date(to.getTime() - DAY_MS));
+    storage = await enforceStorageBudget();
+  } catch (err) {
+    // Give the period back, or a transient failure would silently cost the
+    // whole day's report.
+    if (!force) await releaseReportPeriod("daily", periodKey);
+    throw err;
+  }
 
   let posted = false;
   let threadReplies = 0;
@@ -129,8 +179,14 @@ export async function runDailyReport(now = new Date()): Promise<JobResult> {
   };
 }
 
-/** Build and post the weekly uptime report, with the week-over-week trend. */
-export async function runWeeklyReport(now = new Date()): Promise<JobResult> {
+/**
+ * Build and post the weekly uptime report, with the week-over-week trend.
+ * Exactly-once per ISO week unless `force` is set — see {@link runDailyReport}.
+ */
+export async function runWeeklyReport(
+  now = new Date(),
+  { force = false }: { force?: boolean } = {},
+): Promise<JobResult> {
   if (!hasDatabase()) {
     return { ran: false, skipped: "DATABASE_URL not set — reports need persisted history" };
   }
@@ -138,14 +194,34 @@ export async function runWeeklyReport(now = new Date()): Promise<JobResult> {
   const startedAt = Date.now();
   await ensureSchema();
 
+  const periodKey = weeklyPeriodKey(now);
+  if (!force) {
+    if (!(await isWeeklyDue(now))) {
+      return { ran: false, skipped: `weekly report for week of ${periodKey} was already produced` };
+    }
+    if (!(await claimReportPeriod("weekly", periodKey))) {
+      return {
+        ran: false,
+        skipped: `weekly report for week of ${periodKey} is already being produced`,
+      };
+    }
+  }
+
   const to = now;
   const from = new Date(to.getTime() - WEEK_MS);
   const previousFrom = new Date(from.getTime() - WEEK_MS);
 
-  const [report, previous] = await Promise.all([
-    buildPeriodReport(from, to),
-    buildPeriodReport(previousFrom, from),
-  ]);
+  let report;
+  let previous;
+  try {
+    [report, previous] = await Promise.all([
+      buildPeriodReport(from, to),
+      buildPeriodReport(previousFrom, from),
+    ]);
+  } catch (err) {
+    if (!force) await releaseReportPeriod("weekly", periodKey);
+    throw err;
+  }
 
   let posted = false;
   let threadReplies = 0;
@@ -201,14 +277,23 @@ export async function runDueReports(now = new Date()): Promise<Record<string, Jo
   const out: Record<string, JobResult> = {};
   if (!hasDatabase()) return out;
 
+  // The due checks here are a cheap filter only — `runDailyReport` re-checks and
+  // claims atomically, so a tick racing a late scheduled call still produces
+  // exactly one report.
   try {
-    if (await isDailyDue(now)) out.daily = await runDailyReport(now);
+    if (await isDailyDue(now)) {
+      const result = await runDailyReport(now);
+      if (result.ran) out.daily = result;
+    }
   } catch (err) {
     out.daily = { ran: false, skipped: err instanceof Error ? err.message : String(err) };
   }
 
   try {
-    if (await isWeeklyDue(now)) out.weekly = await runWeeklyReport(now);
+    if (await isWeeklyDue(now)) {
+      const result = await runWeeklyReport(now);
+      if (result.ran) out.weekly = result;
+    }
   } catch (err) {
     out.weekly = { ran: false, skipped: err instanceof Error ? err.message : String(err) };
   }

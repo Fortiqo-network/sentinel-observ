@@ -396,6 +396,29 @@ export async function getLastRunAt(kind: string): Promise<Date | null> {
   return row?.ran_at ?? null;
 }
 
+/**
+ * Atomically claim a report period. Returns true only for the caller that won.
+ *
+ * This is what makes report production exactly-once per period. A read-then-act
+ * check ("has a daily run happened since 03:30?") has a gap between the read and
+ * the write, and any second caller inside that gap produces a duplicate — which
+ * is precisely what a late scheduled call racing the health tick did.
+ */
+export async function claimReportPeriod(kind: string, periodKey: string): Promise<boolean> {
+  const rows = await query<{ kind: string }>(
+    `INSERT INTO report_claims (kind, period_key) VALUES ($1, $2)
+     ON CONFLICT (kind, period_key) DO NOTHING
+     RETURNING kind`,
+    [kind, periodKey],
+  );
+  return rows.length > 0;
+}
+
+/** Release a claim so the period can be retried after a failure. */
+export async function releaseReportPeriod(kind: string, periodKey: string): Promise<void> {
+  await query(`DELETE FROM report_claims WHERE kind = $1 AND period_key = $2`, [kind, periodKey]);
+}
+
 /** Cron runs in a window, used for the monitor's own liveness panel. */
 export async function getRuns(since: Date, kind = "check"): Promise<MonitorRunRow[]> {
   return query<MonitorRunRow>(

@@ -14,7 +14,8 @@ async function handle(req: Request): Promise<NextResponse> {
   const denied = requireCronSecret(req);
   if (denied) return denied;
 
-  const result = await runWeeklyReport();
+  const force = new URL(req.url).searchParams.get("force") === "1";
+  const result = await runWeeklyReport(new Date(), { force });
   return NextResponse.json(result);
 }
 

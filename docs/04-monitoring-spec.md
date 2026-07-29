@@ -108,6 +108,15 @@ The weekly report uses the identical structure over 7 days, adding the per-servi
 
 `GET /api/slack/test?report=1` posts a sample thread with representative data, so the format can be reviewed without waiting for a real day.
 
+**Exactly-once per period.** Reports can be triggered from two directions — the health tick's overdue check, and a scheduled call to `/api/cron/daily`. Because GitHub schedules routinely fire hours late, both can want to produce the same day's report. Two guards prevent a duplicate:
+
+1. an **overdue check** against `monitor_runs` (has a report been produced since today's 03:30 UTC anchor?), and
+2. an **atomic claim** — `INSERT … ON CONFLICT DO NOTHING` on `report_claims (kind, period_key)`.
+
+The first alone is read-then-act and has a race window; the second alone would not cover periods produced before claims existed. Verified against live Postgres: ten concurrent callers on one period yield exactly one winner, a released claim can be retried, and a different period is unaffected. A failure before posting releases the claim, so a transient error costs a delay rather than the whole day's report.
+
+`?force=1` on either cron route bypasses both, for testing.
+
 ### 📊 Legacy single-message format (superseded)
 
 > **📊 Sentinel daily report — Sat, 26 Jul 2026**

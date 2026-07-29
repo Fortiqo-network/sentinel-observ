@@ -96,6 +96,19 @@ CREATE TABLE IF NOT EXISTS money_health (
 );
 CREATE INDEX IF NOT EXISTS idx_money_health_time ON money_health (checked_at DESC);
 
+-- One row per report period actually produced. The primary key is the guard:
+-- inserting is the atomic act of claiming a period, so no matter how many
+-- callers race (the health tick's overdue check, a late scheduled call to
+-- /api/cron/daily, two concurrent function invocations), exactly one wins and
+-- the rest are no-ops. Checking "was a report produced recently?" and then
+-- producing one is not atomic, and that gap is how a day gets two reports.
+CREATE TABLE IF NOT EXISTS report_claims (
+  kind       TEXT NOT NULL,
+  period_key TEXT NOT NULL,
+  claimed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (kind, period_key)
+);
+
 CREATE TABLE IF NOT EXISTS monitor_runs (
   id             BIGSERIAL PRIMARY KEY,
   ran_at         TIMESTAMPTZ NOT NULL DEFAULT now(),

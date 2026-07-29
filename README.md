@@ -24,6 +24,10 @@ The dashboard is **private** — password-protected via `middleware.ts` and excl
 
 ## Status
 
+**Live at https://monitor.fortiqo.xyz.** Full breakdown of what is proven vs merely built, and everything still pending: **[docs/10-status-and-roadmap.md](docs/10-status-and-roadmap.md)**.
+
+The two things that most need attention right now: the GitHub Actions scheduler is delivering roughly 5% of its ticks (so detection latency is hours, not minutes), and the alert path has never fired on a real outage.
+
 **Phase 2 is built.** Probe engine, Postgres persistence, the alert state machine, Slack alerting (down / storm / recovery / reminders), daily + weekly reports, the dashboard, and the gateway aggregate endpoint are all implemented. `npm run build` passes.
 
 What remains is **configuration, not code** — see [Go live](#go-live) below. Until each secret is set the app degrades honestly rather than lying: with no `DATABASE_URL` the dashboard still probes live but records nothing, and with no `MONITOR_TOKEN` the five internal services show as *not monitored* rather than as up.
@@ -43,6 +47,7 @@ What remains is **configuration, not code** — see [Go live](#go-live) below. U
 | [07-operations-notes.md](docs/07-operations-notes.md) | Incident log & ops findings |
 | [08-deployment.md](docs/08-deployment.md) | **Deployment runbook** — Vercel project, env vars, `monitor.fortiqo.xyz` DNS, GitHub Actions secrets, verification |
 | [09-secrets-and-vercel.md](docs/09-secrets-and-vercel.md) | **Canonical reference** — every secret and where it lives, which values must match, all Vercel project settings, rotation order |
+| [10-status-and-roadmap.md](docs/10-status-and-roadmap.md) | **START HERE** — what works, what is proven, what is pending (operator vs engineering), what is deliberately out of scope, known limitations |
 
 ## Go live
 
