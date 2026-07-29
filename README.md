@@ -48,6 +48,7 @@ What remains is **configuration, not code** — see [Go live](#go-live) below. U
 | [08-deployment.md](docs/08-deployment.md) | **Deployment runbook** — Vercel project, env vars, `monitor.fortiqo.xyz` DNS, GitHub Actions secrets, verification |
 | [09-secrets-and-vercel.md](docs/09-secrets-and-vercel.md) | **Canonical reference** — every secret and where it lives, which values must match, all Vercel project settings, rotation order |
 | [10-status-and-roadmap.md](docs/10-status-and-roadmap.md) | **START HERE** — what works, what is proven, what is pending (operator vs engineering), what is deliberately out of scope, known limitations |
+| [11-chatops-deploys.md](docs/11-chatops-deploys.md) | `/deploy` from Slack — Slack app setup, GitHub token scopes, security posture, troubleshooting |
 
 ## Go live
 
@@ -90,6 +91,8 @@ curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://monitor.fortiqo.xyz
 | `GET /api/status` | password | JSON snapshot of the monitoring data |
 | `GET /api/probe` | password | One-shot live probe, no persistence |
 | `POST /api/ingest/pageview` | `INGEST_TOKEN` | Pageview beacon from sentinel-frontend's edge middleware |
+| `POST /api/slack/command` | Slack signature | `/deploy` — posts an ephemeral service picker |
+| `POST /api/slack/interactive` | Slack signature + user allowlist | Deploy button clicks; dispatches `deploy.yml` and records the attempt |
 | `POST /api/cron/check` | `CRON_SECRET` | The 5-minute tick: probe → persist → alert |
 | `POST /api/cron/daily` | `CRON_SECRET` | Daily report + rollups + prune |
 | `POST /api/cron/weekly` | `CRON_SECRET` | Weekly report with trend and MTTR |

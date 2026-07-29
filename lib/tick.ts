@@ -28,6 +28,7 @@ import {
   stormMessage,
 } from "./messages";
 import { isSlackConfigured, postAlarm } from "./slack";
+import { recentDeploysBefore } from "./deploy";
 import {
   fetchMoneyHealth,
   getPreviousMoneyOk,
@@ -81,12 +82,16 @@ async function sendIncidentAlert(
   result: CheckResult,
   lastSeenUp: Date | null,
 ): Promise<boolean> {
+  const recentDeploys = await recentDeploysBefore(incident.service_id, incident.started_at).catch(
+    () => [],
+  );
   const posted = await postAlarm(
     downMessage({
       service: serviceForAlert(incident.service_id),
       result,
       startedAt: incident.started_at,
       lastSeenUp,
+      recentDeploys,
     }),
   );
   if (!posted.ok) return false;

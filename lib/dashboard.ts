@@ -14,6 +14,7 @@ import {
 } from "./repo";
 import { getStorageUsage, type StorageUsage } from "./storage";
 import { getLatestMoneyHealth, type MoneySnapshot } from "./money";
+import { listDeploys, type DeployRow } from "./deploy";
 import { probeAll, type CheckResult } from "./probe";
 import { SERVICES, type ServiceDef } from "./services";
 import { secondsBetween, uptimePercent } from "./format";
@@ -77,6 +78,7 @@ export type DashboardData = {
   monitor: MonitorHealth;
   storage: StorageUsage | null;
   money: MoneySnapshot | null;
+  deploys: DeployRow[];
 };
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -116,6 +118,7 @@ export async function getDashboard(): Promise<DashboardData> {
       monitor: emptyMonitorHealth(),
       storage: null,
       money: null,
+      deploys: [],
     };
   }
 
@@ -140,6 +143,7 @@ export async function getDashboard(): Promise<DashboardData> {
       getStorageUsage().catch(() => null),
     ]);
   const money = await getLatestMoneyHealth().catch(() => null);
+  const deploys = await listDeploys(8).catch(() => []);
 
   const statsById = new Map(stats24h.map((s) => [s.service_id, s]));
   const down24hById = new Map(down24h.map((d) => [d.service_id, d]));
@@ -226,6 +230,7 @@ export async function getDashboard(): Promise<DashboardData> {
     },
     storage,
     money,
+    deploys,
   };
 }
 

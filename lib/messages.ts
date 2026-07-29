@@ -64,8 +64,10 @@ export function downMessage(params: {
   result: CheckResult;
   startedAt: Date;
   lastSeenUp: Date | null;
+  /** Deploys of this service shortly before the failure, newest first. */
+  recentDeploys?: Array<{ triggered_at: Date; actor_name: string | null; actor: string }>;
 }): SlackPayload {
-  const { service, result, startedAt, lastSeenUp } = params;
+  const { service, result, startedAt, lastSeenUp, recentDeploys } = params;
   const reason = result.error ?? "unknown failure";
 
   const blocks: SlackBlock[] = [
@@ -76,9 +78,27 @@ export function downMessage(params: {
       ["Reason", `\`${reason}\``],
       ["Last seen up", lastSeenUp ? formatUtc(lastSeenUp) : "no prior successful check"],
     ]),
-    context(`*Impact:* ${service.impact}`),
-    context(`*Check:* \`${service.debug}\``),
   ];
+
+  // The single most useful thing to know first during an outage. A deploy
+  // notification cannot tell you this, because it does not know a service went
+  // down afterwards.
+  if (recentDeploys?.length) {
+    const deploy = recentDeploys[0];
+    const minutesAgo = Math.max(
+      0,
+      Math.round(secondsBetween(deploy.triggered_at, startedAt) / 60),
+    );
+    blocks.push(
+      section(
+        `:rotating_light: *Deployed ${minutesAgo} minute${minutesAgo === 1 ? "" : "s"} before this outage* — by ${
+          deploy.actor_name ? `@${deploy.actor_name}` : `<@${deploy.actor}>`
+        } at ${formatUtc(deploy.triggered_at)}. Rolling back is likely faster than debugging.`,
+      ),
+    );
+  }
+
+  blocks.push(context(`*Impact:* ${service.impact}`), context(`*Check:* \`${service.debug}\``));
 
   const link = dashboardLink();
   if (link) blocks.push(context(link));

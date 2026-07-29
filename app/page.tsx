@@ -8,6 +8,7 @@ import { IncidentList } from "@/components/dashboard/IncidentList";
 import { MonitorHealthPanel } from "@/components/dashboard/MonitorHealthPanel";
 import { StoragePanel } from "@/components/dashboard/StoragePanel";
 import { MoneyPathPanel } from "@/components/dashboard/MoneyPathPanel";
+import { DeploysPanel } from "@/components/dashboard/DeploysPanel";
 import { LatencyChart } from "@/components/charts/LatencyChart";
 import { UptimeBars } from "@/components/charts/UptimeBars";
 import { Panel } from "@/components/ui/Panel";
@@ -147,6 +148,7 @@ export default async function OverviewPage(): Promise<React.JSX.Element> {
 
         <div className="space-y-6">
           <MoneyPathPanel snapshot={data.money} now={data.generatedAt} />
+          <DeploysPanel deploys={data.deploys} now={data.generatedAt} />
           <MonitorHealthPanel monitor={data.monitor} now={data.generatedAt} />
           {data.storage && <StoragePanel usage={data.storage} />}
         </div>

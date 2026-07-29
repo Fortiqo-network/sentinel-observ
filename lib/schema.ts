@@ -102,6 +102,25 @@ CREATE INDEX IF NOT EXISTS idx_money_health_time ON money_health (checked_at DES
 -- /api/cron/daily, two concurrent function invocations), exactly one wins and
 -- the rest are no-ops. Checking "was a report produced recently?" and then
 -- producing one is not atomic, and that gap is how a day gets two reports.
+-- Audit of every deploy triggered from Slack, successful or not. A rejected
+-- attempt is worth recording too. Doubles as incident context: "was this
+-- service deployed shortly before it went down?" is the first question during
+-- an outage, and no deploy-notification tool can answer it because it does not
+-- know an outage happened.
+CREATE TABLE IF NOT EXISTS deploys (
+  id           BIGSERIAL PRIMARY KEY,
+  triggered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  target_id    TEXT NOT NULL,
+  repo         TEXT NOT NULL,
+  actor        TEXT NOT NULL,
+  actor_name   TEXT,
+  ok           BOOLEAN NOT NULL,
+  error        TEXT,
+  source       TEXT NOT NULL DEFAULT 'slack'
+);
+CREATE INDEX IF NOT EXISTS idx_deploys_time ON deploys (triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_deploys_target ON deploys (target_id, triggered_at DESC);
+
 CREATE TABLE IF NOT EXISTS report_claims (
   kind       TEXT NOT NULL,
   period_key TEXT NOT NULL,

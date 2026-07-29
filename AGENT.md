@@ -31,10 +31,22 @@ network every five minutes, alerts Slack on transitions, and serves a status das
 GitHub Actions workflow, not Vercel Cron — Hobby-plan crons only fire once per day. Runbook:
 [`docs/08-deployment.md`](docs/08-deployment.md).
 
-It is **read-only with respect to the platform**: it calls health endpoints and nothing else. It
-never writes to a Sentinel service, never holds a Sentinel credential beyond `MONITOR_TOKEN`, and
-never proxies user traffic. If a change would make this app able to mutate platform state, it
-belongs somewhere else.
+It is **read-only with respect to running services**: it calls health endpoints and nothing else.
+It never writes to a Sentinel service, never reads user data, and never proxies user traffic.
+
+**One deliberate exception: ChatOps deploys.** `/api/slack/{command,interactive}` can trigger a
+service's GitHub Actions deploy workflow from a Slack button. That makes this app a control plane,
+not purely an observer, and it is the only part of the system that can change production. It is
+built accordingly:
+
+- Slack request-signature verification is the perimeter (these routes cannot sit behind the
+  dashboard password — Slack cannot log in), with a 5-minute replay window.
+- A **valid signature is not authorisation**: anyone in a shared channel can click a button, so a
+  `SLACK_DEPLOY_ALLOWLIST` of Slack user ids gates the action. Unset ⇒ nobody can deploy.
+- Every attempt is recorded in `deploys`, authorised or not.
+
+Do not widen this surface. Anything beyond "dispatch an existing deploy workflow" — arbitrary
+commands, config changes, database access — belongs somewhere with a real authorisation model.
 
 ## Architecture in one paragraph
 
