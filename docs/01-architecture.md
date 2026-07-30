@@ -80,6 +80,11 @@ jobs:
 > 2. **Reports no longer depend on a schedule firing at an exact minute.** Every health tick asks
 >    "is a report overdue?" (`lib/jobs.ts`) and produces it if so. Any tick after 03:30 UTC yields
 >    the daily report, so a dropped schedule delays it rather than losing it.
+>
+> **Update 2026-07-30:** the 5-minute cadence is now driven by a cron on the runner box
+> (`~/bin/observ-tick.sh`, dispatches this workflow via the GitHub API every 5 min); the GitHub
+> schedule remains the backstop for when that box is offline. Details + failure semantics:
+> doc 07, entry 2026-07-30. A fully external cron service is still the recommended endgame.
 
 - The uptime math (doc 05) is based on actual check timestamps, not assumed intervals, so scheduler drift never corrupts the numbers — a missed tick shows as a gap, never as fake downtime.
 - If the project is ever on Vercel Pro, delete the workflow and move all three schedules into `vercel.json` — endpoints are identical.

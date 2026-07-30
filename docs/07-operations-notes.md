@@ -2,6 +2,29 @@
 
 Running log of real operational findings made while building sentinel-observ. Newest first.
 
+## 2026-07-30 — stale "all down" dashboard after a home-internet outage (fixed)
+
+**Symptom:** the home internet dropped and came back, but `monitor.fortiqo.xyz` kept showing every service down, and no 🟢 recovery messages arrived in Slack.
+
+**Diagnosis:** the services were fine (`scripts/probe.mjs`: 7/7 up). The DB state was simply frozen: the last scheduled tick ran at 11:41 UTC, during the outage, and GitHub's throttling of the `*/5` schedule (~1 run/hour, gaps up to 2.5 h — see doc 01) meant no tick had run since the internet returned. **The dashboard shows the last persisted state, not a live probe** — no tick, no update, no recovery alert. The recovery/reminder logic itself was never the problem: the moment a manual `workflow_dispatch` tick ran (13:12 UTC), all six affected services transitioned `recovered`, `alertsSent: 7, alertErrors: []`, and the threaded 🟢 messages appeared in `#sentinel-alarms`. Frontend correctly never alerted — Vercel stayed up while the tunnel was down.
+
+**Fix (installed 2026-07-30):** a cron entry on the runner box now dispatches the monitor workflow every 5 minutes, restoring the intended cadence:
+
+- `~/bin/observ-tick.sh` — POSTs a `workflow_dispatch` for `monitor-tick.yml` via the GitHub API (token read at runtime from the existing `~/.git-credentials` store; nothing hardcoded). The repo is public, so Actions runs are free.
+- `crontab -l` → `*/5 * * * * /home/trap/bin/observ-tick.sh >/dev/null 2>&1`
+
+**Failure semantics of the combined triggers:**
+
+| Scenario | What fires ticks | Result |
+|---|---|---|
+| Normal operation | server cron (5 min) + GH schedule (backstop) | ≤6-min detection, on-time hourly reminders |
+| Home internet / box down | GH schedule only (~hourly) | outage IS detected and alerted, but detection/reminder timing degrades to GH's throttled cadence |
+| Internet restored | server cron resumes immediately | recovery detected and 🟢 posted within ≤5 min — this incident's failure mode is closed |
+
+**Still recommended (needs an account, user action):** a dedicated cron service (cron-job.org or similar, free at 1-minute resolution) calling `POST /api/cron/check` with the `Authorization: Bearer CRON_SECRET` header — a fully external trigger with none of the above degradation. Both existing triggers can stay; the tick is idempotent.
+
+**Reminder cadence note:** "still down" reminders are first sent at 30 minutes into an incident, then hourly (`lib/state.ts` — `FIRST_REMINDER_SECS` / `REPEAT_REMINDER_SECS`), per service, in the incident's Slack thread. They fire on ticks, so their punctuality inherits the trigger cadence above.
+
 ## 2026-07-26 — sentinel-runtime crash-restart loop (found & hot-fixed)
 
 **How it was found:** the first ever run of `scripts/probe.mjs` (Phase 1 validation) showed 6/7 services up — `runtime` refused connections on :8004 while every other container had 8–13 days of uptime. `docker ps` showed `sentinel-runtime` in `Restarting (1)` — a silent crash loop nobody had noticed. This is precisely the failure class sentinel-observ exists to catch within 5 minutes.
